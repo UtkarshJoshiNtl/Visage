@@ -1,0 +1,23 @@
+[project]
+name = "visage"
+version = "0.1.0"
+description = "System Performance Dashboard — live TUI for CPU, memory, disk, network, and processes"
+authors = [{ name = "You" }]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "psutil>=6.0.0",
+    "textual>=8.0.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+visage = "visage.__main__:main"
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["visage*"]
