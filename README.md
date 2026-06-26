@@ -79,6 +79,30 @@ Runs three performance tests inline and prints scored results:
 - **Memory** — Sequential read/write bandwidth (MB/s)
 - **Disk** — Sequential write/read on a temp file (MB/s)
 
+### Hardware-Isolated Benchmark Runner
+
+Programmatic entry points for deterministic, noise-filtered benchmarking:
+
+```python
+from visage.runners import run_isolated, run_benchmark
+
+# Single run on core 3 with PMU counters
+r = run_isolated("/usr/bin/myapp", core_id=3)
+
+# Repeated runs with statistical noise filtering
+s = run_benchmark("/usr/bin/myapp", core_id=3,
+                  iterations=10, max_sigma_pct=1.0)
+print(f"IPC: μ={s.ipc_mean:.3f} σ={s.ipc_std:.3f} noisy={s.noisy}")
+```
+
+Features:
+- **Core isolation** — cpuset cgroup v2 (root) → `sched_setaffinity` fallback
+- **Frequency lock** — saves governor + min/max freq, sets `performance` governor at a constant kHz
+- **Hardware PMU counters** — `perf_event_open` via raw ctypes (cycles, instructions, cache misses, IPC)
+- **Noise filtering** — runs N iterations, computes μ and σ, flags if any CV exceeds threshold
+
+All features degrade gracefully when unprivileged (WSL2, no root).
+
 ### Remote Monitoring
 
 ```bash
@@ -124,11 +148,12 @@ visage/
     ├── style.tcss              # Tokyo Night inspired theme (CSS for TUI)
     ├── util.py                 # format_bytes, format_rate, DeltaTracker
     ├── collectors/
-    │   ├── cpu.py              # psutil.cpu_percent, cpu_freq, cpu_stats
-    │   ├── memory.py           # psutil.virtual_memory, swap_memory
-    │   ├── disk.py             # psutil.disk_io_counters (cumulative)
-    │   ├── network.py          # psutil.net_io_counters (cumulative)
+    │   ├── cpu.py              # Raw /proc/stat parser (no psutil)
+    │   ├── memory.py           # Raw /proc/meminfo parser (no psutil)
+    │   ├── disk.py             # Cumulative disk I/O via psutil
+    │   ├── network.py          # Cumulative net I/O via psutil
     │   ├── process.py          # psutil.process_iter, sorted by CPU%
+    │   ├── perf.py             # Hardware PMU counters via perf_event_open + ctypes
     │   ├── sensors.py          # Temperatures + RAPL power
     │   └── cache.py            # /proc/cpuinfo cache topology
     ├── widgets/
@@ -139,8 +164,12 @@ visage/
     │   └── processes.py        # Rich Table of top-N processes
     ├── benchmark/
     │   └── runner.py           # CPU pi, memory bandwidth, disk sequential
+    ├── runners/
+    │   ├── __init__.py         # Public API: run_isolated, run_benchmark
+    │   └── isolated.py         # CpuCage, CpufreqLock, BenchmarkResult, BenchmarkSummary
     ├── tracing/
-    │   └── tracer.py           # /proc-based process birth/death monitor
+    │   ├── __init__.py         # create_tracer factory
+    │   └── tracer.py           # BCC eBPF tracer + /proc polling fallback
     ├── export/
     │   └── exporter.py         # JSON / CSV / log append
     └── remote/
@@ -153,20 +182,44 @@ visage/
 - **Widgets use Textual reactives** — each widget exposes `reactive` attributes. Setting them triggers targeted re-renders, avoiding full-screen redraws.
 - **Refresh rate is adjustable** — `d` cycles between 0.5s, 1s (default), 2s, and 5s.
 - **Remote mode shares the same code** — `visage --remote` starts a FastAPI server that calls the identical `collectors.*` functions.
+- **Raw /proc parsers** replace psutil for CPU and memory — single FD opened once, seek(0) each tick.
+- **No third-party deps for PMU counters** — `perf_event_open` called via raw `ctypes`.
+- **Graceful degradation** — all kernel-level features (eBPF, PMU, cpuset, frequency lock) fall back to unprivileged alternatives when root/permissions are unavailable.
+
+### Hardware Sandbox (Checkpoint 5)
+
+```
+run_benchmark("binary", core_id=3, target_freq_khz=3000000, iterations=10)
+  │
+  ├─ CpuCage(cpuset cgroup v2 → sched_setaffinity)
+  │    └─ CpufreqLock(save governor+min+max → performance@3GHz)
+  │
+  ├─ [10 iterations]
+  │    ├─ perf_event_open(cpu=3, disabled=True)
+  │    ├─── reset + enable
+  │    ├─── spawn via taskset -c 3
+  │    ├─── wait / measure
+  │    └─── disable + read
+  │
+  └─ BenchmarkSummary
+       ├─ μ, σ for IPC, cache misses, wall time
+       └─ noisy if any CV > max_sigma_pct
+```
 
 ## Requirements
 
 - Python ≥ 3.11
-- Linux (for full sensor and cache support; macOS works with reduced features)
+- Linux (for full sensor, PMU, and cache support; macOS works with reduced features)
 
 Dependencies (installed automatically):
 
 | Package | Purpose |
 |---------|---------|
-| `psutil` | System metrics (CPU, memory, disk, network, processes) |
+| `psutil` | System metrics (disk, network, processes; CPU & memory use raw /proc) |
 | `textual` | Terminal UI framework |
 | `rich` | Pretty terminal output (tables, formatting) |
 | `fastapi` + `uvicorn` | Remote monitoring web server (optional) |
+| `python3-bpfcc` | eBPF process tracer via BCC (optional, requires root) |
 
 ## Development
 
@@ -180,11 +233,12 @@ pip install -e ".[dev]"
 
 - [x] Core dashboard (CPU, memory, disk, network, processes)
 - [x] Benchmark mode
-- [x] Process tracing
+- [x] Process tracing (BCC eBPF + /proc fallback)
 - [x] Temperature & power sensors
 - [x] Cache statistics
 - [x] JSON/CSV export
 - [x] Remote monitoring via FastAPI
+- [x] **Hardware sandbox** — core isolation + frequency lock + PMU counters + noise filtering
 - [ ] GPU metrics (NVIDIA / AMD)
 - [ ] Historical graphs (sparklines)
 - [ ] Config file (which metrics to show, thresholds)
