@@ -16,3 +16,6 @@ Thumbs.db
 # Project
 *.snapshot.json
 *.csv
+
+# Graphify knowledge graph outputs
+graphify-out/
