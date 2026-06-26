@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -85,6 +86,101 @@ class BenchmarkResult:
     core_id: int = 0
 
     error: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class BenchmarkSummary:
+    """Aggregated statistics from repeated benchmark runs.
+
+    Parameters
+    ----------
+    iterations
+        Number of runs executed.
+    returncodes
+        Per-run exit codes.
+    wall_times
+        Per-run wall clock durations (seconds).
+    cycles
+        Per-run HW cycle counts.
+    instructions
+        Per-run instruction counts.
+    cache_misses
+        Per-run LLC miss counts.
+    ipc_values
+        Per-run instructions-per-cycle ratios.
+    ipc_mean
+        Mean IPC across all runs.
+    ipc_std
+        Population standard deviation of IPC.
+    miss_mean
+        Mean cache misses across all runs.
+    miss_std
+        Population standard deviation of cache misses.
+    time_mean
+        Mean wall time across all runs.
+    time_std
+        Population standard deviation of wall time.
+    noisy
+        ``True`` if any metric's coefficient of variation
+        (``std / mean``) exceeds *max_sigma_pct*.
+    max_sigma_pct
+        The threshold used for the noise test.
+    available
+        Whether PMU counters were accessible.
+    isolated
+        Whether cpuset isolation was active.
+    freq_locked
+        Whether frequency was locked.
+    core_id
+        CPU core the benchmark ran on.
+    """
+
+    iterations: int
+
+    returncodes: list[int] = dataclasses.field(default_factory=list)
+    wall_times: list[float] = dataclasses.field(default_factory=list)
+
+    cycles: list[int] = dataclasses.field(default_factory=list)
+    instructions: list[int] = dataclasses.field(default_factory=list)
+    cache_misses: list[int] = dataclasses.field(default_factory=list)
+
+    ipc_values: list[float] = dataclasses.field(default_factory=list)
+
+    ipc_mean: float = 0.0
+    ipc_std: float = 0.0
+
+    miss_mean: float = 0.0
+    miss_std: float = 0.0
+
+    time_mean: float = 0.0
+    time_std: float = 0.0
+
+    noisy: bool = False
+    max_sigma_pct: float = 1.0
+
+    available: bool = False
+    isolated: bool = False
+    freq_locked: bool = False
+    core_id: int = 0
+
+    def __post_init__(self) -> None:
+        noise_violations = 0
+        for mean, std, name in (
+            (self.ipc_mean, self.ipc_std, "IPC"),
+            (self.miss_mean, self.miss_std, "cache misses"),
+            (self.time_mean, self.time_std, "wall time"),
+        ):
+            if mean == 0.0:
+                continue
+            cv = (std / mean) * 100.0
+            if cv > self.max_sigma_pct:
+                noise_violations += 1
+                log.debug(
+                    "Noise: %s CV=%.2f%% exceeds threshold %.1f%%",
+                    name, cv, self.max_sigma_pct,
+                )
+        if noise_violations:
+            object.__setattr__(self, "noisy", True)
 
 
 class CpufreqLock:
@@ -425,3 +521,171 @@ def run_isolated(
     finally:
         for c in counters:
             c.close()
+
+
+def run_benchmark(
+    executable: str,
+    args: Sequence[str] = (),
+    *,
+    core_id: int = 0,
+    target_freq_khz: int | None = None,
+    iterations: int = 10,
+    max_sigma_pct: float = 1.0,
+    timeout: float | None = None,
+    with_counters: bool = True,
+) -> BenchmarkSummary:
+    """Run *executable* repeatedly on an isolated core and filter noise.
+
+    Executes the target *iterations* times within a single isolated
+    session (cpuset + frequency lock held for the entire duration).
+    Per-run PMU counter deltas are recorded, then aggregated into mean
+    and population standard deviation.  If any metric's coefficient of
+    variation (``σ / μ``) exceeds *max_sigma_pct*, the summary is
+    flagged as *noisy* — indicating that an external interrupt or OS
+    jitter likely perturbed one or more of the runs.
+
+    Parameters
+    ----------
+    executable
+        Path to the binary to benchmark.
+    args
+        Command-line arguments.
+    core_id
+        Logical CPU index to pin the child to.
+    target_freq_khz
+        If set, lock the core's clock to this frequency (kHz).
+    iterations
+        Number of times to run the target.
+    max_sigma_pct
+        Coefficient-of-variation threshold for the noise flag (percent).
+    timeout
+        Per-run wall-clock deadline.
+    with_counters
+        If ``True``, open ``perf_event_open`` HW counters on *core_id*.
+
+    Returns
+    -------
+    BenchmarkSummary
+    """
+    returncodes: list[int] = []
+    wall_times: list[float] = []
+    cycles: list[int] = []
+    instructions: list[int] = []
+    cache_misses: list[int] = []
+    ipc_values: list[float] = []
+
+    counters: list[HardwareCounter] = []
+    if with_counters:
+        for name, cfg in (
+            ("cycles", PERF_COUNT_HW_CPU_CYCLES),
+            ("instructions", PERF_COUNT_HW_INSTRUCTIONS),
+            ("cache_misses", PERF_COUNT_HW_CACHE_MISSES),
+        ):
+            try:
+                c = HardwareCounter(name, cfg, pid=-1, cpu=core_id, disabled=True)
+                counters.append(c)
+            except OSError as exc:
+                log.debug("perf_event_open(%s) failed: %s", name, exc)
+                for c in counters:
+                    c.close()
+                counters = []
+                break
+
+    try:
+        with CpuCage(core_id, target_freq_khz=target_freq_khz) as cage:
+            for _ in range(iterations):
+                for c in counters:
+                    c.reset()
+                    c.enable()
+
+                t0 = time.monotonic()
+                proc = subprocess.Popen(
+                    [shutil.which(executable) or executable, *map(str, args)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                cage.pin_process(proc.pid)
+                cage.move_process(proc.pid)
+
+                try:
+                    ret = proc.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                    for c in counters:
+                        c.disable()
+                    return BenchmarkSummary(
+                        iterations=iterations,
+                        returncodes=returncodes + [-1],
+                        wall_times=wall_times + [time.monotonic() - t0],
+                        cycles=cycles,
+                        instructions=instructions,
+                        cache_misses=cache_misses,
+                        ipc_values=ipc_values,
+                        available=len(counters) > 0,
+                        isolated=cage.isolated,
+                        freq_locked=cage.freq_locked,
+                        core_id=core_id,
+                        max_sigma_pct=max_sigma_pct,
+                    )
+
+                elapsed = time.monotonic() - t0
+
+                for c in counters:
+                    c.disable()
+
+                vals = {c.name: c.read() for c in counters}
+                cyc = vals.get("cycles", 0)
+                inst = vals.get("instructions", 0)
+                miss = vals.get("cache_misses", 0)
+
+                returncodes.append(ret)
+                wall_times.append(elapsed)
+                cycles.append(cyc)
+                instructions.append(inst)
+                cache_misses.append(miss)
+                ipc_values.append(inst / cyc if cyc > 0 else 0.0)
+
+    finally:
+        for c in counters:
+            c.close()
+
+    n = len(returncodes)
+    ipc_mean = sum(ipc_values) / n if n > 0 else 0.0
+    miss_mean = sum(cache_misses) / n if n > 0 else 0.0
+    time_mean = sum(wall_times) / n if n > 0 else 0.0
+
+    ipc_std = (
+        math.sqrt(sum((v - ipc_mean) ** 2 for v in ipc_values) / n) if n > 0 else 0.0
+    )
+    miss_std = (
+        math.sqrt(sum((v - miss_mean) ** 2 for v in cache_misses) / n)
+        if n > 0
+        else 0.0
+    )
+    time_std = (
+        math.sqrt(sum((v - time_mean) ** 2 for v in wall_times) / n)
+        if n > 0
+        else 0.0
+    )
+
+    return BenchmarkSummary(
+        iterations=n,
+        returncodes=returncodes,
+        wall_times=wall_times,
+        cycles=cycles,
+        instructions=instructions,
+        cache_misses=cache_misses,
+        ipc_values=ipc_values,
+        ipc_mean=ipc_mean,
+        ipc_std=ipc_std,
+        miss_mean=miss_mean,
+        miss_std=miss_std,
+        time_mean=time_mean,
+        time_std=time_std,
+        available=len(counters) > 0,
+        isolated=cage.isolated,
+        freq_locked=cage.freq_locked,
+        core_id=core_id,
+        max_sigma_pct=max_sigma_pct,
+    )

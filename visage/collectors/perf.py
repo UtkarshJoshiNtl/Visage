@@ -26,6 +26,7 @@ PERF_COUNT_HW_CACHE_MISSES = 3
 
 PERF_EVENT_IOC_ENABLE = 0x2400
 PERF_EVENT_IOC_DISABLE = 0x2401
+PERF_EVENT_IOC_RESET = 0x2403
 
 _libc = ctypes.CDLL("libc.so.6", use_errno=True)
 
@@ -100,6 +101,10 @@ class HardwareCounter:
     def disable(self) -> None:
         """Pause counting."""
         fcntl.ioctl(self._fd, PERF_EVENT_IOC_DISABLE)
+
+    def reset(self) -> None:
+        """Zero the counter."""
+        fcntl.ioctl(self._fd, PERF_EVENT_IOC_RESET)
 
     def close(self) -> None:
         if self._fd >= 0:
