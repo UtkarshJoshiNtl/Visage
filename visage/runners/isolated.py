@@ -1,19 +1,26 @@
 """Hardware-isolated benchmark runner.
 
-Pins a child process to a dedicated CPU core and measures wall-clock time
-alongside silicon-level PMU counters (cycles, instructions, cache misses)
-via the kernel's ``perf_event_open`` syscall.
+Pins a child process to a dedicated CPU core, locks the core's clock
+frequency, and measures wall-clock time alongside silicon-level PMU
+counters (cycles, instructions, cache misses) via the kernel's
+``perf_event_open`` syscall.
 
 Isolation
 ---------
-Two-layer strategy, applied in order:
+Three-layer strategy, applied in order:
 
 1. **cpuset cgroup v2** (requires root)
    Enable the ``cpuset`` controller, create a child cgroup restricted to
    the target core, then move the benchmark process into it. No other task
    will be scheduled on that core during the run.
 
-2. **``sched_setaffinity``** (no root needed)
+2. **Frequency lock** (requires root)
+   Save the core's cpufreq governor, ``scaling_min_freq``, and
+   ``scaling_max_freq``; set governor to ``performance`` and clamp both
+   min/max to a constant target frequency so cycle counts are
+   deterministic across runs.
+
+3. **``sched_setaffinity``** (no root needed)
    Pin the child process to the target core with ``taskset(1)``.  The OS
    may still schedule background tasks on the core, but the benchmark
    cannot migrate away.
@@ -25,6 +32,7 @@ Permissions
 -----------
 - PMU counters (``perf_event_open``): requires ``CAP_PERFMON`` or root.
 - cgroup isolation: requires root (``CAP_SYS_ADMIN``).
+- Frequency lock: requires root (write to cpufreq sysfs).
 - Process pinning: unprivileged.
 """
 
@@ -48,6 +56,11 @@ from visage.collectors.perf import (
 log = logging.getLogger(__name__)
 
 _CGROUP_ROOT = "/sys/fs/cgroup"
+_CPUFREQ_BASE = "/sys/devices/system/cpu/cpu{}/cpufreq"
+
+
+class CpuFreqUnavailableError(RuntimeError):
+    """Raised when cpufreq sysfs is absent or read-only for the target core."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -68,9 +81,87 @@ class BenchmarkResult:
 
     available: bool = False
     isolated: bool = False
+    freq_locked: bool = False
     core_id: int = 0
 
     error: str | None = None
+
+
+class CpufreqLock:
+    """Save/restore CPU frequency governor and min/max limits.
+
+    Parameters
+    ----------
+    core_id
+        Logical CPU index.
+    target_khz
+        Desired frequency in kHz.
+    """
+
+    def __init__(self, core_id: int, target_khz: int) -> None:
+        self.core_id = core_id
+        self.target_khz = target_khz
+        self._sysfs = _CPUFREQ_BASE.format(core_id)
+        self._saved: dict[str, str] = {}
+        self._locked = False
+
+    def _read(self, name: str) -> str | None:
+        path = f"{self._sysfs}/{name}"
+        try:
+            with open(path) as f:
+                return f.read().strip()
+        except (FileNotFoundError, PermissionError, OSError):
+            return None
+
+    def _write(self, name: str, value: str) -> None:
+        path = f"{self._sysfs}/{name}"
+        try:
+            with open(path, "w") as f:
+                f.write(value)
+        except PermissionError as exc:
+            raise CpuFreqUnavailableError(
+                f"Cannot write {path} — need root"
+            ) from exc
+        except FileNotFoundError as exc:
+            raise CpuFreqUnavailableError(
+                f"cpufreq sysfs not found at {self._sysfs} — "
+                "no cpufreq driver on this system"
+            ) from exc
+
+    def lock(self) -> None:
+        """Save current state and lock frequency to *target_khz*."""
+        self._saved["scaling_governor"] = self._read("scaling_governor") or ""
+        self._saved["scaling_min_freq"] = self._read("scaling_min_freq") or ""
+        self._saved["scaling_max_freq"] = self._read("scaling_max_freq") or ""
+
+        freq_str = str(self.target_khz)
+        self._write("scaling_governor", "performance")
+        self._write("scaling_min_freq", freq_str)
+        self._write("scaling_max_freq", freq_str)
+
+        self._locked = True
+        log.info(
+            "CpufreqLock[%d]: locked to %d kHz (%s/%s → performance)",
+            self.core_id,
+            self.target_khz,
+            self._saved.get("scaling_governor", "?"),
+            self._saved.get("scaling_max_freq", "?"),
+        )
+
+    def unlock(self) -> None:
+        """Restore original governor and min/max frequencies."""
+        if not self._locked:
+            return
+        for key in ("scaling_max_freq", "scaling_min_freq", "scaling_governor"):
+            val = self._saved.get(key)
+            if val:
+                self._write(key, val)
+        self._locked = False
+        log.info("CpufreqLock[%d]: restored original governor/freq", self.core_id)
+
+    @property
+    def locked(self) -> bool:
+        return self._locked
 
 
 class CpuCage:
@@ -80,18 +171,26 @@ class CpuCage:
     ----------
     core_id : int
         Logical CPU index to isolate.
+    target_freq_khz : int | None
+        If set, lock the core's clock to this frequency (kHz) for the
+        duration of the benchmark.  Requires root + cpufreq driver.
 
     Attributes
     ----------
     isolated : bool
         Whether exclusive OS isolation (cpuset) was achieved.
+    freq_locked : bool
+        Whether frequency was successfully locked.
     """
 
-    def __init__(self, core_id: int) -> None:
+    def __init__(self, core_id: int, target_freq_khz: int | None = None) -> None:
         self.core_id = core_id
+        self.target_freq_khz = target_freq_khz
         self._cgroup_parent: str | None = None
         self._cgroup_path: str | None = None
+        self._freq_lock: CpufreqLock | None = None
         self.isolated = False
+        self.freq_locked = False
 
     # ------------------------------------------------------------------
     # context manager
@@ -109,7 +208,7 @@ class CpuCage:
     # ------------------------------------------------------------------
 
     def setup(self) -> None:
-        """Attempt cgroup-based isolation; no-op on failure."""
+        """Attempt cpuset isolation, then frequency lock."""
         if self._setup_cgroup():
             self.isolated = True
             log.info("CpuCage[%d]: cpuset isolation active", self.core_id)
@@ -119,7 +218,14 @@ class CpuCage:
                 self.core_id,
             )
 
+        if self.target_freq_khz is not None:
+            self.freq_locked = self._setup_freq_lock()
+
     def teardown(self) -> None:
+        if self._freq_lock is not None:
+            self._freq_lock.unlock()
+            self._freq_lock = None
+            self.freq_locked = False
         if self._cgroup_path:
             try:
                 os.rmdir(self._cgroup_path)
@@ -127,6 +233,21 @@ class CpuCage:
                 log.warning("CpuCage teardown: %s", exc)
             self._cgroup_path = None
         self._cgroup_parent = None
+
+    # ------------------------------------------------------------------
+    # frequency lock
+    # ------------------------------------------------------------------
+
+    def _setup_freq_lock(self) -> bool:
+        assert self.target_freq_khz is not None
+        try:
+            fl = CpufreqLock(self.core_id, self.target_freq_khz)
+            fl.lock()
+            self._freq_lock = fl
+            return True
+        except CpuFreqUnavailableError as exc:
+            log.warning("CpuCage[%d]: freq lock unavailable — %s", self.core_id, exc)
+            return False
 
     # ------------------------------------------------------------------
     # cgroup v2 cpuset
@@ -198,6 +319,7 @@ def run_isolated(
     args: Sequence[str] = (),
     *,
     core_id: int = 0,
+    target_freq_khz: int | None = None,
     timeout: float | None = None,
     with_counters: bool = True,
 ) -> BenchmarkResult:
@@ -211,6 +333,9 @@ def run_isolated(
         Command-line arguments.
     core_id
         Logical CPU index to pin the child to.
+    target_freq_khz
+        If set, lock the core's clock to this frequency (kHz) for the
+        duration of the run.  Requires root + cpufreq driver.
     timeout
         Wall-clock deadline (seconds).  ``None`` means no limit.
     with_counters
@@ -240,7 +365,7 @@ def run_isolated(
                 break
 
     try:
-        with CpuCage(core_id) as cage:
+        with CpuCage(core_id, target_freq_khz=target_freq_khz) as cage:
             for c in counters:
                 c.enable()
 
@@ -266,6 +391,7 @@ def run_isolated(
                     wall_time=elapsed,
                     available=len(counters) > 0,
                     isolated=cage.isolated,
+                    freq_locked=cage.freq_locked,
                     core_id=core_id,
                     error=f"Timed out after {timeout}s",
                 )
@@ -293,6 +419,7 @@ def run_isolated(
                 miss_per_sec=misses / elapsed if elapsed > 0 else 0.0,
                 available=len(counters) > 0,
                 isolated=cage.isolated,
+                freq_locked=cage.freq_locked,
                 core_id=core_id,
             )
     finally:
