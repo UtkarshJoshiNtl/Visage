@@ -17,6 +17,9 @@ class ProcessesWidget(Widget):
             yield Label("Processes", classes="metric-title")
             yield Static(id="proc-table", classes="metric-detail")
 
+    def on_mount(self) -> None:
+        self._table = self.query_one("#proc-table", Static)
+
     def watch_processes(self, procs: list[dict[str, Any]]) -> None:
         table = Table(box=None, padding=(0, 1), show_header=False)
         table.add_column("Name", no_wrap=True, style="bold")
@@ -32,7 +35,7 @@ class ProcessesWidget(Widget):
         if not procs:
             table.add_row("(no data)", "", "")
 
-        self.query_one("#proc-table", Static).update(table)
+        self._table.update(table)
 
     def update_data(self, data: list[dict[str, Any]]) -> None:
         self.processes = data

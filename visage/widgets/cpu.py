@@ -25,9 +25,14 @@ class CpuWidget(Widget):
                 yield Static(id="cpu-pct", classes="metric-value")
             yield Static(id="cpu-detail", classes="metric-detail")
 
+    def on_mount(self) -> None:
+        self._bar = self.query_one("#cpu-bar", ProgressBar)
+        self._pct = self.query_one("#cpu-pct", Static)
+        self._detail = self.query_one("#cpu-detail", Static)
+
     def watch_percent(self, value: float) -> None:
-        self.query_one("#cpu-bar", ProgressBar).progress = min(value, 100.0)
-        self.query_one("#cpu-pct", Static).update(format_percent(value))
+        self._bar.progress = min(value, 100.0)
+        self._pct.update(format_percent(value))
 
     def watch_per_cpu(self, cores: list[float]) -> None:
         parts = []
@@ -40,7 +45,7 @@ class CpuWidget(Widget):
             else:
                 parts.append(f"[green]{label}[/]")
         detail = "  ".join(parts) if parts else ""
-        self.query_one("#cpu-detail", Static).update(detail)
+        self._detail.update(detail)
 
     def update_data(self, data: dict) -> None:
         self.percent = data["percent"]

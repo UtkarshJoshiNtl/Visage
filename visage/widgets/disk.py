@@ -19,6 +19,9 @@ class DiskWidget(Widget):
             yield Label("Disk", classes="metric-title")
             yield Static(id="disk-content", classes="metric-detail")
 
+    def on_mount(self) -> None:
+        self._content = self.query_one("#disk-content", Static)
+
     def watch_read_rate(self, _: float) -> None:
         self._update()
 
@@ -26,7 +29,7 @@ class DiskWidget(Widget):
         self._update()
 
     def _update(self) -> None:
-        self.query_one("#disk-content", Static).update(
+        self._content.update(
             f"Read:  [bold green]{format_rate(self.read_rate)}[/]"
             f"   Write: [bold yellow]{format_rate(self.write_rate)}[/]"
         )

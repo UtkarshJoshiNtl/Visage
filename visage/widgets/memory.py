@@ -28,21 +28,28 @@ class MemoryWidget(Widget):
                 yield Static(id="mem-pct", classes="metric-value")
             yield Static(id="mem-detail", classes="metric-detail")
 
+    def on_mount(self) -> None:
+        self._bar = self.query_one("#mem-bar", ProgressBar)
+        self._pct = self.query_one("#mem-pct", Static)
+        self._detail = self.query_one("#mem-detail", Static)
+
     def watch_percent(self, value: float) -> None:
-        self.query_one("#mem-bar", ProgressBar).progress = min(value, 100.0)
-        used_fmt = format_bytes(self.used)
-        total_fmt = format_bytes(self.total)
-        self.query_one("#mem-pct", Static).update(format_percent(value))
+        self._bar.progress = min(value, 100.0)
+        self._pct.update(format_percent(value))
 
     def watch_used(self, _: int) -> None:
+        self._refresh_detail()
+
+    def watch_total(self, _: int) -> None:
+        self._refresh_detail()
+
+    def _refresh_detail(self) -> None:
         used_fmt = format_bytes(self.used)
         total_fmt = format_bytes(self.total)
         swap = ""
         if self.swap_total > 0:
             swap = f"  Swap: {format_bytes(self.swap_used)} / {format_bytes(self.swap_total)}"
-        self.query_one("#mem-detail", Static).update(
-            f"{used_fmt} / {total_fmt}{swap}"
-        )
+        self._detail.update(f"{used_fmt} / {total_fmt}{swap}")
 
     def update_data(self, data: dict) -> None:
         self.percent = data["percent"]
