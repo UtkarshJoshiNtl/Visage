@@ -370,11 +370,11 @@ class CpuCage:
             return False
 
         try:
-            with open(f"{cage_path}cpuset.cpus", "w") as f:
+            with open(f"{cage_path}/cpuset.cpus", "w") as f:
                 f.write(str(self.core_id))
             with open(_CGROUP_ROOT + "/cpuset.mems") as src:
                 mems = src.read().strip()
-            with open(f"{cage_path}cpuset.mems", "w") as f:
+            with open(f"{cage_path}/cpuset.mems", "w") as f:
                 f.write(mems)
         except OSError as exc:
             log.debug("CpuCage cpuset config failed: %s", exc)
@@ -395,7 +395,7 @@ class CpuCage:
         if not self._cgroup_path:
             return False
         try:
-            with open(f"{self._cgroup_path}cgroup.procs", "w") as f:
+            with open(f"{self._cgroup_path}/cgroup.procs", "w") as f:
                 f.write(str(pid))
             return True
         except OSError as exc:
