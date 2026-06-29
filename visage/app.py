@@ -34,6 +34,7 @@ class VisageApp(App):
         self._interval = 1.0
         self._disk_tracker = DeltaTracker()
         self._net_tracker = DeltaTracker()
+        self._sys_timer = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -57,7 +58,7 @@ class VisageApp(App):
         self._net_tracker.update(net_col.collect())
 
         self.fetch_system_metrics()
-        self.set_interval(self._interval, self.fetch_system_metrics)
+        self._sys_timer = self.set_interval(self._interval, self.fetch_system_metrics)
         self.set_interval(2.0, self.fetch_process_metrics)
 
     @work(thread=True, exclusive=True, group="system")
@@ -99,4 +100,6 @@ class VisageApp(App):
         idx = current.index(self._interval) if self._interval in current else 1
         self._interval = current[(idx + 1) % len(current)]
         self.notify(f"Refresh: {speeds[self._interval]}", timeout=2)
-        self.set_interval(self._interval, self.fetch_system_metrics)
+        if self._sys_timer is not None:
+            self._sys_timer.remove()
+        self._sys_timer = self.set_interval(self._interval, self.fetch_system_metrics)
