@@ -2,15 +2,38 @@
 name = "visage"
 version = "0.1.0"
 description = "System Performance Dashboard — live TUI for CPU, memory, disk, network, and processes"
-authors = [{ name = "You" }]
+authors = [{ name = "Anomaly Co." }]
 license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.11"
+keywords = ["dashboard", "monitoring", "tui", "system", "performance"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console :: Curses",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Benchmarking",
+]
 dependencies = [
     "psutil>=6.0.0",
     "textual>=8.0.0",
     "rich>=13.0.0",
 ]
+
+[project.optional-dependencies]
+remote = ["fastapi>=0.100.0", "uvicorn>=0.20.0"]
+tracing = ["bcc"]
+
+[project.urls]
+Homepage = "https://github.com/anomalyco/visage"
+Repository = "https://github.com/anomalyco/visage"
 
 [project.scripts]
 visage = "visage.__main__:main"
