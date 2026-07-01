@@ -5,12 +5,22 @@ from textual.reactive import reactive
 from textual.widgets import Label, ProgressBar, Static
 from textual.widget import Widget
 
-from visage.util import format_percent
+from visage.util import HistoryBuffer, format_percent, render_sparkline
 
 
 class CpuWidget(Widget):
     percent: float = reactive(0.0)
     per_cpu: list[float] = reactive([])
+
+    def __init__(self):
+        super().__init__()
+        self._cpu_hist = HistoryBuffer(60)
+        self._red = 80.0
+        self._yellow = 50.0
+
+    def set_thresholds(self, t: dict) -> None:
+        self._red = float(t.get("red", self._red))
+        self._yellow = float(t.get("yellow", self._yellow))
 
     def compose(self):
         with Vertical(classes="metric-card"):
@@ -32,15 +42,16 @@ class CpuWidget(Widget):
 
     def watch_percent(self, value: float) -> None:
         self._bar.progress = min(value, 100.0)
-        self._pct.update(format_percent(value))
+        spark = render_sparkline(self._cpu_hist.normalize(), 15)
+        self._pct.update(f"{format_percent(value)}  {spark}")
 
     def watch_per_cpu(self, cores: list[float]) -> None:
         parts = []
         for i, p in enumerate(cores):
             label = f"C{i}:{p:.0f}%"
-            if p >= 80:
+            if p >= self._red:
                 parts.append(f"[red]{label}[/]")
-            elif p >= 50:
+            elif p >= self._yellow:
                 parts.append(f"[yellow]{label}[/]")
             else:
                 parts.append(f"[green]{label}[/]")
@@ -49,4 +60,5 @@ class CpuWidget(Widget):
 
     def update_data(self, data: dict) -> None:
         self.percent = data["percent"]
+        self._cpu_hist.push(data["percent"])
         self.per_cpu = data.get("per_cpu", [])

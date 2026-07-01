@@ -12,6 +12,7 @@ import ctypes
 import fcntl
 import os
 import struct
+import sys
 import time
 from typing import Any
 
@@ -146,6 +147,9 @@ def _ensure_counters() -> bool:
     if _counters:
         _available = True
         return True
+    if sys.platform != "linux":
+        _available = False
+        return False
     opened: list[HardwareCounter] = []
     try:
         for name, config in _COUNTER_SPECS:

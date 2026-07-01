@@ -5,7 +5,7 @@ from textual.reactive import reactive
 from textual.widgets import Label, ProgressBar, Static
 from textual.widget import Widget
 
-from visage.util import format_bytes, format_percent
+from visage.util import HistoryBuffer, format_bytes, format_percent, render_sparkline
 
 
 class MemoryWidget(Widget):
@@ -14,6 +14,16 @@ class MemoryWidget(Widget):
     total: int = reactive(0)
     swap_used: int = reactive(0)
     swap_total: int = reactive(0)
+
+    def __init__(self):
+        super().__init__()
+        self._hist = HistoryBuffer(60)
+        self._red = 90.0
+        self._yellow = 75.0
+
+    def set_thresholds(self, t: dict) -> None:
+        self._red = float(t.get("red", self._red))
+        self._yellow = float(t.get("yellow", self._yellow))
 
     def compose(self):
         with Vertical(classes="metric-card"):
@@ -35,7 +45,14 @@ class MemoryWidget(Widget):
 
     def watch_percent(self, value: float) -> None:
         self._bar.progress = min(value, 100.0)
-        self._pct.update(format_percent(value))
+        spark = render_sparkline(self._hist.normalize(), 15)
+        if value >= self._red:
+            color = "red"
+        elif value >= self._yellow:
+            color = "yellow"
+        else:
+            color = "green"
+        self._pct.update(f"[{color}]{format_percent(value)}[/]  {spark}")
 
     def watch_used(self, _: int) -> None:
         self._refresh_detail()
@@ -52,6 +69,7 @@ class MemoryWidget(Widget):
         self._detail.update(f"{used_fmt} / {total_fmt}{swap}")
 
     def update_data(self, data: dict) -> None:
+        self._hist.push(data["percent"])
         self.percent = data["percent"]
         self.used = data["used"]
         self.total = data["total"]

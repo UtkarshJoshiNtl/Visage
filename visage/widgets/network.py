@@ -5,12 +5,17 @@ from textual.reactive import reactive
 from textual.widgets import Label, Static
 from textual.widget import Widget
 
-from visage.util import format_rate
+from visage.util import HistoryBuffer, format_rate, render_sparkline
 
 
 class NetworkWidget(Widget):
     down_rate: float = reactive(0.0)
     up_rate: float = reactive(0.0)
+
+    def __init__(self):
+        super().__init__()
+        self._down_hist = HistoryBuffer(60)
+        self._up_hist = HistoryBuffer(60)
 
     def compose(self):
         with Vertical(classes="metric-card"):
@@ -27,11 +32,15 @@ class NetworkWidget(Widget):
         self._update()
 
     def _update(self) -> None:
+        down_spark = render_sparkline(self._down_hist.normalize(), 12)
+        up_spark = render_sparkline(self._up_hist.normalize(), 12)
         self._content.update(
-            f"[bold green]\u2193 {format_rate(self.down_rate)}[/]"
-            f"   [bold yellow]\u2191 {format_rate(self.up_rate)}[/]"
+            f"[bold green]\u2193 {format_rate(self.down_rate)}[/]  {down_spark}\n"
+            f"[bold yellow]\u2191 {format_rate(self.up_rate)}[/]  {up_spark}"
         )
 
     def update_data(self, data: dict) -> None:
+        self._down_hist.push(data.get("bytes_recv", 0.0))
+        self._up_hist.push(data.get("bytes_sent", 0.0))
         self.down_rate = data.get("bytes_recv", 0.0)
         self.up_rate = data.get("bytes_sent", 0.0)

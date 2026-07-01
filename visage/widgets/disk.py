@@ -5,7 +5,7 @@ from textual.reactive import reactive
 from textual.widgets import Label, Static
 from textual.widget import Widget
 
-from visage.util import format_rate
+from visage.util import HistoryBuffer, format_rate, render_sparkline
 
 
 class DiskWidget(Widget):
@@ -13,6 +13,11 @@ class DiskWidget(Widget):
     write_rate: float = reactive(0.0)
     read_count_rate: float = reactive(0.0)
     write_count_rate: float = reactive(0.0)
+
+    def __init__(self):
+        super().__init__()
+        self._rd_hist = HistoryBuffer(60)
+        self._wr_hist = HistoryBuffer(60)
 
     def compose(self):
         with Vertical(classes="metric-card"):
@@ -29,12 +34,16 @@ class DiskWidget(Widget):
         self._update()
 
     def _update(self) -> None:
+        rd_spark = render_sparkline(self._rd_hist.normalize(), 10)
+        wr_spark = render_sparkline(self._wr_hist.normalize(), 10)
         self._content.update(
-            f"Read:  [bold green]{format_rate(self.read_rate)}[/]"
-            f"   Write: [bold yellow]{format_rate(self.write_rate)}[/]"
+            f"Read:  [bold green]{format_rate(self.read_rate)}[/]  {rd_spark}\n"
+            f"Write: [bold yellow]{format_rate(self.write_rate)}[/]  {wr_spark}"
         )
 
     def update_data(self, data: dict) -> None:
+        self._rd_hist.push(data.get("read_bytes", 0.0))
+        self._wr_hist.push(data.get("write_bytes", 0.0))
         self.read_rate = data.get("read_bytes", 0.0)
         self.write_rate = data.get("write_bytes", 0.0)
         self.read_count_rate = data.get("read_count", 0.0)

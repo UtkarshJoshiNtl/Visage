@@ -5,6 +5,7 @@ eliminating the psutil dependency. Opens /proc/stat once at module init
 and rewinds via seek(0) on each tick to avoid open/close overhead.
 """
 
+import sys
 from typing import TextIO
 
 _STAT_PATH = "/proc/stat"
@@ -18,7 +19,12 @@ _prev: dict[str, tuple[int, int]] = {}
 def _get_fd():
     global _fd
     if _fd is None:
-        _fd = open(_STAT_PATH)
+        if sys.platform != "linux":
+            return None
+        try:
+            _fd = open(_STAT_PATH)
+        except OSError:
+            return None
     return _fd
 
 
@@ -42,6 +48,19 @@ def collect() -> dict:
     global _cpu_count, _prev
 
     fd = _get_fd()
+    if fd is None:
+        return {
+            "percent": 0.0,
+            "per_cpu": [],
+            "count": 0,
+            "freq_current": 0.0,
+            "freq_min": 0.0,
+            "freq_max": 0.0,
+            "ctx_switches": 0,
+            "interrupts": 0,
+            "soft_interrupts": 0,
+            "syscalls": 0,
+        }
     fd.seek(0)
 
     aggregate_total = 0

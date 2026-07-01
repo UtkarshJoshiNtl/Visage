@@ -1,5 +1,6 @@
 """Shared formatting utilities."""
 
+from collections import deque
 from typing import Sequence
 
 
@@ -49,3 +50,51 @@ class DeltaTracker:
         }
         self._prev = {k: float(v) for k, v in current.items()}
         return result
+
+
+class HistoryBuffer:
+    """Rolling window of the last N values for sparkline rendering."""
+
+    __slots__ = ("_buf", "_maxlen")
+
+    def __init__(self, maxlen: int = 60):
+        self._buf: deque[float] = deque(maxlen=maxlen)
+        self._maxlen = maxlen
+
+    def push(self, value: float) -> None:
+        self._buf.append(value)
+
+    @property
+    def values(self) -> list[float]:
+        return list(self._buf)
+
+    @property
+    def full(self) -> bool:
+        return len(self._buf) == self._maxlen
+
+    def normalize(self) -> list[float]:
+        vals = self.values
+        if not vals:
+            return []
+        lo, hi = min(vals), max(vals)
+        span = hi - lo if hi > lo else 1.0
+        return [(v - lo) / span for v in vals]
+
+
+_SPARKLINE_CHARS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
+
+
+def render_sparkline(values: list[float], width: int = 12) -> str:
+    """Render normalised floats (0..1) as a Unicode sparkline bar."""
+    if not values:
+        return ""
+    n = len(values)
+    if n < 2:
+        return _SPARKLINE_CHARS[7] if values else ""
+    if width > n:
+        width = n
+    indices = [round(i * (n - 1) / (width - 1)) for i in range(width)]
+    if width == 1:
+        indices = [0]
+    chars = [_SPARKLINE_CHARS[min(7, max(0, round(values[i] * 7)))] for i in indices]
+    return "".join(chars)

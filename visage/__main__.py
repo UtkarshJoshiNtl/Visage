@@ -46,6 +46,12 @@ def main() -> None:
         default="visage_snapshot.json",
         help="Output path for --export",
     )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to config JSON",
+    )
     args = parser.parse_args()
 
     if args.benchmark:
@@ -55,13 +61,13 @@ def main() -> None:
     elif args.export:
         _run_export(args.output)
     else:
-        _run_dashboard()
+        _run_dashboard(args.config)
 
 
-def _run_dashboard() -> None:
+def _run_dashboard(config_path: str | None = None) -> None:
     from visage.app import VisageApp
 
-    app = VisageApp()
+    app = VisageApp(config_path=config_path)
     sys.exit(app.run())
 
 

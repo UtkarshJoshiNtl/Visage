@@ -5,6 +5,7 @@ from /proc/meminfo. Opens the file once and rewinds via seek(0) on each tick.
 Values are converted from kB to bytes for widget compatibility.
 """
 
+import sys
 from typing import TextIO
 
 _MEMINFO_PATH = "/proc/meminfo"
@@ -15,7 +16,12 @@ _fd: TextIO | None = None
 def _get_fd():
     global _fd
     if _fd is None:
-        _fd = open(_MEMINFO_PATH)
+        if sys.platform != "linux":
+            return None
+        try:
+            _fd = open(_MEMINFO_PATH)
+        except OSError:
+            return None
     return _fd
 
 
@@ -25,6 +31,16 @@ def _parse_kb(line: str) -> int:
 
 def collect() -> dict:
     fd = _get_fd()
+    if fd is None:
+        return {
+            "total": 0,
+            "available": 0,
+            "used": 0,
+            "percent": 0.0,
+            "swap_total": 0,
+            "swap_used": 0,
+            "swap_percent": 0.0,
+        }
     fd.seek(0)
 
     mem_total = 0
