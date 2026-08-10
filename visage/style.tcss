@@ -11,7 +11,7 @@ Screen {
 }
 
 .metric-card {
-    margin: 0 0 1 0;
+    margin: 0 0 0 0;
     background: #24283b;
     border: solid #3b4261;
     border-title-color: #7aa2f7;

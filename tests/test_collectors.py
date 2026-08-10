@@ -1,5 +1,7 @@
 """Tests for visage collectors — parse logic and edge cases."""
 
+from unittest.mock import patch
+
 from visage.collectors.cpu import _parse_jiffies
 from visage.collectors.gpu import EMPTY_RESULT, collect, _find_spec, _compute_roofline
 
@@ -105,6 +107,8 @@ class TestGpuRooflineMath:
         assert rl["bound_by"] == "Idle"
 
     def test_no_gpu_fallback(self):
-        result = collect()
-        assert result["available"] is False
-        assert result == EMPTY_RESULT
+        with patch("visage.collectors.gpu._vendor", None), \
+             patch("visage.collectors.gpu._ensure_gpu", return_value=False):
+            result = collect()
+            assert result["available"] is False
+            assert result == EMPTY_RESULT

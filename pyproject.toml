@@ -31,6 +31,10 @@ dependencies = [
 remote = ["fastapi>=0.100.0", "uvicorn>=0.20.0"]
 tracing = ["bcc"]
 gpu = ["nvidia-ml-py>=12.0.0", "amdsmi>=6.0.0"]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=1.0.0"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [project.urls]
 Homepage = "https://github.com/anomalyco/visage"

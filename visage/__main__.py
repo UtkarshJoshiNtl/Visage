@@ -110,7 +110,7 @@ def _run_remote(port: int) -> None:
 
 
 def _run_export(path: str) -> None:
-    from visage.collectors import cpu, disk, memory, network, process
+    from visage.collectors import cpu, disk, gpu, memory, network, process
     from visage.collectors.sensors import collect as collect_sensors
     from visage.export.exporter import export_json
 
@@ -119,6 +119,7 @@ def _run_export(path: str) -> None:
         "memory": memory.collect(),
         "disk": disk.collect(),
         "network": network.collect(),
+        "gpu": gpu.collect(),
         "processes": process.collect(),
         "sensors": collect_sensors(),
     }

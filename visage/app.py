@@ -43,6 +43,7 @@ class VisageApp(App):
         self._alert_engine = AlertEngine()
         self._alert_engine.set_rules(self._cfg.alerts)
         self._alert_engine.set_action(self._fire_alert)
+        self._widgets: dict[str, object] = {}
 
     _WIDGET_CLASSES = {
         "cpu": CpuWidget,
@@ -52,6 +53,9 @@ class VisageApp(App):
         "gpu": GpuWidget,
         "processes": ProcessesWidget,
     }
+
+    def _widget(self, name: str):
+        return self._widgets.get(name)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -65,16 +69,20 @@ class VisageApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self._cpu_widget = self.query_one(CpuWidget)
-        self._mem_widget = self.query_one(MemoryWidget)
-        self._disk_widget = self.query_one(DiskWidget)
-        self._net_widget = self.query_one(NetworkWidget)
-        self._gpu_widget = self.query_one(GpuWidget)
-        self._proc_widget = self.query_one(ProcessesWidget)
+        self._widgets: dict[str, object] = {}
+        for name, cls in self._WIDGET_CLASSES.items():
+            found = self.query(cls)
+            if found:
+                self._widgets[name] = found.first()
 
-        self._cpu_widget.set_thresholds(self._cfg.thresholds.get("cpu", {}))
-        self._mem_widget.set_thresholds(self._cfg.thresholds.get("memory", {}))
-        self._gpu_widget.set_thresholds(self._cfg.thresholds)
+        for name in ("cpu", "memory", "gpu"):
+            widget = self._widget(name)
+            if widget is None:
+                continue
+            if name == "gpu":
+                widget.set_thresholds(self._cfg.thresholds)
+            else:
+                widget.set_thresholds(self._cfg.thresholds.get(name, {}))
 
         cpu_col.collect()
         gpu_col.collect()
@@ -86,7 +94,7 @@ class VisageApp(App):
         self.set_interval(2.0, self.fetch_process_metrics)
 
     def _fire_alert(self, message: str) -> None:
-        self.notify(message, timeout=5)
+        self.call_from_thread(self.notify, message, timeout=5)
 
     @work(thread=True, exclusive=True, group="system")
     def fetch_system_metrics(self) -> None:
@@ -114,8 +122,11 @@ class VisageApp(App):
 
     @work(thread=True, exclusive=True, group="process")
     def fetch_process_metrics(self) -> None:
+        proc_widget = self._widget("processes")
+        if proc_widget is None:
+            return
         proc_data = proc_col.collect()
-        self.call_from_thread(self._proc_widget.update_data, proc_data)
+        self.call_from_thread(proc_widget.update_data, proc_data)
 
     def _update_system_ui(
         self,
@@ -125,11 +136,16 @@ class VisageApp(App):
         net_delta: dict,
         gpu_data: dict,
     ) -> None:
-        self._cpu_widget.update_data(cpu_data)
-        self._mem_widget.update_data(mem_data)
-        self._disk_widget.update_data(disk_delta)
-        self._net_widget.update_data(net_delta)
-        self._gpu_widget.update_data(gpu_data)
+        for name, data in (
+            ("cpu", cpu_data),
+            ("memory", mem_data),
+            ("disk", disk_delta),
+            ("network", net_delta),
+            ("gpu", gpu_data),
+        ):
+            widget = self._widget(name)
+            if widget is not None:
+                widget.update_data(data)
 
     def action_refresh_now(self) -> None:
         self.fetch_system_metrics()
@@ -142,5 +158,5 @@ class VisageApp(App):
         self._interval = current[(idx + 1) % len(current)]
         self.notify(f"Refresh: {speeds[self._interval]}", timeout=2)
         if self._sys_timer is not None:
-            self._sys_timer.remove()
+            self._sys_timer.stop()
         self._sys_timer = self.set_interval(self._interval, self.fetch_system_metrics)

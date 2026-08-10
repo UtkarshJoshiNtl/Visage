@@ -2,9 +2,11 @@
 
 from visage.util import (
     DeltaTracker,
+    HistoryBuffer,
     format_bytes,
     format_percent,
     format_rate,
+    render_sparkline,
     shorten_name,
 )
 
@@ -105,3 +107,48 @@ class TestDeltaTracker:
         result = dt.update({"a": 10, "b": 20})
         for v in result.values():
             assert isinstance(v, float)
+
+
+class TestRenderSparkline:
+    def test_empty(self):
+        assert render_sparkline([]) == ""
+
+    def test_single_value(self):
+        assert render_sparkline([0.5]) == "\u2588"
+
+    def test_width_one_no_divide_by_zero(self):
+        assert render_sparkline([0.0, 0.5, 1.0], width=1) == "\u2581"
+
+    def test_zero_width_returns_empty(self):
+        assert render_sparkline([0.5, 1.0], width=0) == ""
+
+    def test_width_wider_than_data_clamps(self):
+        out = render_sparkline([0.0, 0.5, 1.0], width=15)
+        assert len(out) == 3
+
+    def test_normal_range_has_expected_length(self):
+        out = render_sparkline([0.1, 0.4, 0.7, 1.0, 0.0, 0.6, 0.9], width=5)
+        assert len(out) == 5
+
+    def test_all_values_in_charset(self):
+        out = render_sparkline([0.0, 0.25, 0.5, 0.75, 1.0], width=5)
+        for ch in out:
+            assert "\u2581" <= ch <= "\u2588"
+
+
+class TestHistoryBuffer:
+    def test_capacity_limited(self):
+        buf = HistoryBuffer(3)
+        for v in (1, 2, 3, 4, 5):
+            buf.push(v)
+        assert buf.values == [3, 4, 5]
+        assert buf.full
+
+    def test_normalize_empty(self):
+        assert HistoryBuffer().normalize() == []
+
+    def test_normalize_flat_series(self):
+        buf = HistoryBuffer(3)
+        for _ in range(3):
+            buf.push(5.0)
+        assert buf.normalize() == [0.0, 0.0, 0.0]

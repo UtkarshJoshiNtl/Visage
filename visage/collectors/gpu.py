@@ -76,8 +76,13 @@ def _ensure_gpu() -> bool:
         pynvml.nvmlInit()
         h = pynvml.nvmlDeviceGetHandleByIndex(0)
         name = pynvml.nvmlDeviceGetName(h)
-        attrs = pynvml.nvmlDeviceGetAttributes(h)
-        sm_count = attrs.multiProcessorCount
+
+        sm_count = 0
+        try:
+            attrs = pynvml.nvmlDeviceGetAttributes(h)
+            sm_count = attrs.multiProcessorCount
+        except Exception:
+            pass
 
         try:
             cmax = pynvml.nvmlDeviceGetMaxClockInfo(h, pynvml.NVML_CLOCK_GRAPHICS)

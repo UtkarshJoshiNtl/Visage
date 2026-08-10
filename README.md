@@ -57,6 +57,7 @@ Shows live metrics in a terminal UI:
 | **Memory** | RAM bar with used/total, swap usage |
 | **Disk** | Read/write throughput in real time |
 | **Network** | Download/upload speeds |
+| **GPU** | SM/memory utilization, clocks, power, temperature, roofline analysis (when present) |
 | **Processes** | Top processes sorted by CPU usage |
 
 **Controls:**
@@ -103,6 +104,37 @@ Features:
 
 All features degrade gracefully when unprivileged (WSL2, no root).
 
+### Configuration
+
+Visage reads `visage.json` from the current directory, `~/.config/visage/config.json`, or `~/.visage.json`. Every key is optional; defaults apply for anything omitted.
+
+```jsonc
+{
+  "refresh": { "interval": 1.0 },
+  "widgets": {
+    "enabled": ["cpu", "memory", "disk", "network", "gpu", "processes"],
+    "order": ["cpu", "memory", "disk", "network", "gpu", "processes"]
+  },
+  "thresholds": {
+    "cpu":     { "red": 80, "yellow": 50 },
+    "memory":  { "red": 90, "yellow": 75 },
+    "gpu_sm_util":   { "red": 80, "yellow": 50 },
+    "gpu_mem_util":  { "red": 80, "yellow": 50 },
+    "gpu_temp_c":    { "red": 85, "yellow": 70 },
+    "gpu_power_w":   { "red": 90, "yellow": 75 }
+  },
+  "gpu": { "arch_override": null },
+  "alerts": [
+    { "name": "cpu-hot", "metric": "cpu_percent", "op": "gt",
+      "value": 80, "cooldown": 60, "message": "CPU at {value}%" }
+  ]
+}
+```
+
+- `widgets.enabled` toggles dashboard sections; disabling one removes it from the UI (and its collector).
+- `thresholds` color-code the utilization bars; GPU keys use the `gpu_*` prefix.
+- `alerts` pop a toast when a snapshot value passes the rule; `op` is one of `gt|lt|gte|lte` and `cooldown` (seconds) suppresses repeats.
+
 ### Remote Monitoring
 
 ```bash
@@ -145,14 +177,17 @@ visage/
     ├── __init__.py
     ├── __main__.py             # CLI dispatcher (dashboard / benchmark / remote / export)
     ├── app.py                  # Textual Application, timer, data wiring
+    ├── alert.py                # Rule-based alert engine (threshold checks, cooldowns)
+    ├── config.py               # Zero-dependency JSON config loader
     ├── style.tcss              # Tokyo Night inspired theme (CSS for TUI)
-    ├── util.py                 # format_bytes, format_rate, DeltaTracker
+    ├── util.py                 # format_bytes, format_rate, DeltaTracker, sparklines
     ├── collectors/
     │   ├── cpu.py              # Raw /proc/stat parser (no psutil)
     │   ├── memory.py           # Raw /proc/meminfo parser (no psutil)
     │   ├── disk.py             # Cumulative disk I/O via psutil
     │   ├── network.py          # Cumulative net I/O via psutil
     │   ├── process.py          # psutil.process_iter, sorted by CPU%
+    │   ├── gpu.py              # NVIDIA (NVML) / AMD (AMDSMI) metrics, roofline data
     │   ├── perf.py             # Hardware PMU counters via perf_event_open + ctypes
     │   ├── sensors.py          # Temperatures + RAPL power
     │   └── cache.py            # /proc/cpuinfo cache topology
@@ -161,6 +196,7 @@ visage/
     │   ├── memory.py           # ProgressBar + used/total + swap
     │   ├── disk.py             # Read/write rates
     │   ├── network.py          # ↓↑ throughput
+    │   ├── gpu.py              # Utilization, clocks, power, roofline + bound-by
     │   └── processes.py        # Rich Table of top-N processes
     ├── benchmark/
     │   └── runner.py           # CPU pi, memory bandwidth, disk sequential
@@ -239,9 +275,9 @@ pip install -e ".[dev]"
 - [x] JSON/CSV export
 - [x] Remote monitoring via FastAPI
 - [x] **Hardware sandbox** — core isolation + frequency lock + PMU counters + noise filtering
-- [ ] GPU metrics (NVIDIA / AMD)
-- [ ] Historical graphs (sparklines)
-- [ ] Config file (which metrics to show, thresholds)
+- [x] GPU metrics (NVIDIA / AMD) with roofline analysis
+- [x] Historical graphs (sparklines)
+- [x] Config file (which metrics to show, thresholds) + alert rules
 - [ ] Docker support
 
 ## License

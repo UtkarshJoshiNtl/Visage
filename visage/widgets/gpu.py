@@ -56,10 +56,19 @@ class GpuWidget(Widget):
             "power_w": {"red": 90, "yellow": 75},
         }
 
+    _THRESHOLD_KEY_MAP = {
+        "gpu_sm_util": "sm_util",
+        "gpu_mem_util": "mem_util",
+        "gpu_temp_c": "temp_c",
+        "gpu_power_w": "power_w",
+    }
+
     def set_thresholds(self, t: dict) -> None:
-        for key, default in self._th.items():
-            merged = {**default, **t.get(key, {})}
-            self._th[key] = merged
+        for key, value in t.items():
+            mapped = self._THRESHOLD_KEY_MAP.get(key, key)
+            if mapped not in self._th or not isinstance(value, dict):
+                continue
+            self._th[mapped] = {**self._th[mapped], **value}
 
     def compose(self):
         with Vertical(classes="metric-card"):
@@ -98,7 +107,7 @@ class GpuWidget(Widget):
 
     def watch_available(self, val: bool) -> None:
         if not val:
-            self._title.update("GPU [dim]— no GPU detected (install visage[gpu])[/]")
+            self._title.update("GPU [dim]— no GPU detected (pip install visage[gpu])[/]")
             self._sm_bar.progress = 0
             self._sm_pct.update("")
             self._mem_bar.progress = 0
@@ -108,6 +117,12 @@ class GpuWidget(Widget):
             self._memory.update("")
             self._roofline.update("")
             self._bound.update("")
+            for w in (
+                self._sm_bar, self._mem_bar,
+                self._power_temp, self._clocks,
+                self._memory, self._roofline, self._bound,
+            ):
+                w.display = False
 
     def watch_name(self, name: str) -> None:
         vtag = {"nvidia": "[blue]NVIDIA[/]", "amd": "[red]AMD[/]"}.get(self.vendor, "")
@@ -251,6 +266,12 @@ class GpuWidget(Widget):
         self.available = data.get("available", False)
         if not self.available:
             return
+        for w in (
+            self._sm_bar, self._mem_bar,
+            self._power_temp, self._clocks,
+            self._memory, self._roofline, self._bound,
+        ):
+            w.display = True
         self._sm_hist.push(data.get("sm_util", 0.0))
         self._mem_hist.push(data.get("mem_util", 0.0))
         self._pwr_hist.push(data.get("power_w", 0.0))

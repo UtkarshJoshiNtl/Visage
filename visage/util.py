@@ -86,15 +86,16 @@ _SPARKLINE_CHARS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
 
 def render_sparkline(values: list[float], width: int = 12) -> str:
     """Render normalised floats (0..1) as a Unicode sparkline bar."""
-    if not values:
+    if not values or width < 1:
         return ""
     n = len(values)
     if n < 2:
-        return _SPARKLINE_CHARS[7] if values else ""
+        return _SPARKLINE_CHARS[7]
     if width > n:
         width = n
-    indices = [round(i * (n - 1) / (width - 1)) for i in range(width)]
     if width == 1:
         indices = [0]
+    else:
+        indices = [round(i * (n - 1) / (width - 1)) for i in range(width)]
     chars = [_SPARKLINE_CHARS[min(7, max(0, round(values[i] * 7)))] for i in indices]
     return "".join(chars)
