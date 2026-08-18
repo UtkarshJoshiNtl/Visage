@@ -1,9 +1,4 @@
-"""Memory metric collector — raw /proc/meminfo parser.
-
-Reads only the 4 fields we need (MemTotal, MemAvailable, SwapTotal, SwapFree)
-from /proc/meminfo. Opens the file once and rewinds via seek(0) on each tick.
-Values are converted from kB to bytes for widget compatibility.
-"""
+"""Memory metric collector — raw /proc/meminfo parser with detailed breakdown."""
 
 import sys
 from typing import TextIO
@@ -40,6 +35,10 @@ def collect() -> dict:
             "swap_total": 0,
             "swap_used": 0,
             "swap_percent": 0.0,
+            "buffers": 0,
+            "cached": 0,
+            "sreclaimable": 0,
+            "dirty": 0,
         }
     fd.seek(0)
 
@@ -47,6 +46,10 @@ def collect() -> dict:
     mem_avail = 0
     swap_total = 0
     swap_free = 0
+    buffers = 0
+    cached = 0
+    sreclaimable = 0
+    dirty = 0
 
     for line in fd:
         if line.startswith("MemTotal:"):
@@ -57,6 +60,14 @@ def collect() -> dict:
             swap_total = _parse_kb(line)
         elif line.startswith("SwapFree:"):
             swap_free = _parse_kb(line)
+        elif line.startswith("Buffers:"):
+            buffers = _parse_kb(line)
+        elif line.startswith("Cached:"):
+            cached = _parse_kb(line)
+        elif line.startswith("SReclaimable:"):
+            sreclaimable = _parse_kb(line)
+        elif line.startswith("Dirty:"):
+            dirty = _parse_kb(line)
 
     mem_used = mem_total - mem_avail
     swap_used = swap_total - swap_free
@@ -70,4 +81,8 @@ def collect() -> dict:
         "swap_total": swap_total,
         "swap_used": swap_used,
         "swap_percent": (swap_used / swap_total * 100.0) if swap_total > 0 else 0.0,
+        "buffers": buffers,
+        "cached": cached,
+        "sreclaimable": sreclaimable,
+        "dirty": dirty,
     }

@@ -1,4 +1,4 @@
-"""Memory usage widget — progress bar with used/total and swap info."""
+"""Memory usage widget — progress bar with detailed breakdown and swap info."""
 
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
@@ -20,6 +20,10 @@ class MemoryWidget(Widget):
         self._hist = HistoryBuffer(60)
         self._red = 90.0
         self._yellow = 75.0
+        self._buffers = 0
+        self._cached = 0
+        self._sreclaimable = 0
+        self._dirty = 0
 
     def set_thresholds(self, t: dict) -> None:
         self._red = float(t.get("red", self._red))
@@ -37,11 +41,13 @@ class MemoryWidget(Widget):
                 )
                 yield Static(id="mem-pct", classes="metric-value")
             yield Static(id="mem-detail", classes="metric-detail")
+            yield Static(id="mem-breakdown", classes="metric-detail")
 
     def on_mount(self) -> None:
         self._bar = self.query_one("#mem-bar", ProgressBar)
         self._pct = self.query_one("#mem-pct", Static)
         self._detail = self.query_one("#mem-detail", Static)
+        self._breakdown = self.query_one("#mem-breakdown", Static)
 
     def watch_percent(self, value: float) -> None:
         self._bar.progress = min(value, 100.0)
@@ -65,7 +71,8 @@ class MemoryWidget(Widget):
         total_fmt = format_bytes(self.total)
         swap = ""
         if self.swap_total > 0:
-            swap = f"  Swap: {format_bytes(self.swap_used)} / {format_bytes(self.swap_total)}"
+            swap_pct = (self.swap_used / self.swap_total * 100) if self.swap_total > 0 else 0
+            swap = f"  Swap: {format_bytes(self.swap_used)} / {format_bytes(self.swap_total)} ({swap_pct:.0f}%)"
         self._detail.update(f"{used_fmt} / {total_fmt}{swap}")
 
     def update_data(self, data: dict) -> None:
@@ -75,3 +82,22 @@ class MemoryWidget(Widget):
         self.total = data["total"]
         self.swap_used = data["swap_used"]
         self.swap_total = data["swap_total"]
+
+        self._buffers = data.get("buffers", 0)
+        self._cached = data.get("cached", 0)
+        self._sreclaimable = data.get("sreclaimable", 0)
+        self._dirty = data.get("dirty", 0)
+
+        parts = []
+        if self._buffers > 0:
+            parts.append(f"Buf: {format_bytes(self._buffers)}")
+        if self._cached > 0:
+            parts.append(f"Cached: {format_bytes(self._cached)}")
+        if self._sreclaimable > 0:
+            parts.append(f"Recl: {format_bytes(self._sreclaimable)}")
+        if self._dirty > 0:
+            parts.append(f"Dirty: {format_bytes(self._dirty)}")
+        if parts:
+            self._breakdown.update("  ".join(parts))
+        else:
+            self._breakdown.update("")

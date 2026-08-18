@@ -12,6 +12,7 @@ from visage.collectors import network as net_col
 from visage.collectors import gpu as gpu_col
 from visage.collectors import process as proc_col
 from visage.collectors.sensors import collect as collect_sensors
+from visage.collectors.battery import collect as collect_battery
 from visage.alert import AlertEngine
 from visage.config import load_config
 from visage.util import DeltaTracker
@@ -22,6 +23,7 @@ from visage.widgets.memory import MemoryWidget
 from visage.widgets.network import NetworkWidget
 from visage.widgets.processes import ProcessesWidget
 from visage.widgets.sensors import SensorsWidget
+from visage.widgets.battery import BatteryWidget
 
 
 class VisageApp(App):
@@ -54,6 +56,7 @@ class VisageApp(App):
         "network": NetworkWidget,
         "gpu": GpuWidget,
         "sensors": SensorsWidget,
+        "battery": BatteryWidget,
         "processes": ProcessesWidget,
     }
 
@@ -89,13 +92,21 @@ class VisageApp(App):
 
         cpu_col.collect()
         gpu_col.collect()
-        self._disk_tracker.update(disk_col.collect())
-        self._net_tracker.update(net_col.collect())
+        disk_snapshot = disk_col.collect()
+        self._disk_tracker.update(disk_snapshot.get("total", {}))
+        net_snapshot = net_col.collect()
+        net_total = net_snapshot.get("total", {})
+        net_delta = self._net_tracker.update(net_total)
+        net_widget_data = {
+            "total": net_delta,
+            "pernic": net_snapshot.get("pernic", {}),
+        }
 
         self.fetch_system_metrics()
         self._sys_timer = self.set_interval(self._interval, self.fetch_system_metrics)
         self.set_interval(2.0, self.fetch_process_metrics)
         self.set_interval(self._interval * 3, self.fetch_sensor_metrics)
+        self.set_interval(5.0, self.fetch_battery_metrics)
 
     def _fire_alert(self, message: str) -> None:
         self.call_from_thread(self.notify, message, timeout=5)
@@ -104,10 +115,21 @@ class VisageApp(App):
     def fetch_system_metrics(self) -> None:
         cpu_data = cpu_col.collect()
         mem_data = mem_col.collect()
-        disk_raw = disk_col.collect()
-        disk_delta = self._disk_tracker.update(disk_raw)
+        disk_snapshot = disk_col.collect()
+        disk_total = disk_snapshot.get("total", {})
+        disk_delta = self._disk_tracker.update(disk_total)
+        disk_widget_data = {
+            "total": disk_delta,
+            "perdisk": disk_snapshot.get("perdisk", {}),
+            "partitions": disk_snapshot.get("partitions", []),
+        }
         net_raw = net_col.collect()
-        net_delta = self._net_tracker.update(net_raw)
+        net_total = net_raw.get("total", {})
+        net_delta = self._net_tracker.update(net_total)
+        net_widget_data = {
+            "total": net_delta,
+            "pernic": net_raw.get("pernic", {}),
+        }
         gpu_data = gpu_col.collect()
 
         snapshot = {
@@ -121,7 +143,7 @@ class VisageApp(App):
         self._alert_engine.evaluate(snapshot)
 
         self.call_from_thread(
-            self._update_system_ui, cpu_data, mem_data, disk_delta, net_delta, gpu_data
+            self._update_system_ui, cpu_data, mem_data, disk_widget_data, net_widget_data, gpu_data
         )
 
     @work(thread=True, exclusive=True, group="process")
@@ -145,6 +167,14 @@ class VisageApp(App):
             return
         sensor_data = collect_sensors()
         self.call_from_thread(sensor_widget.update_data, sensor_data)
+
+    @work(thread=True, exclusive=True, group="battery")
+    def fetch_battery_metrics(self) -> None:
+        bat_widget = self._widget("battery")
+        if bat_widget is None:
+            return
+        bat_data = collect_battery()
+        self.call_from_thread(bat_widget.update_data, bat_data)
 
     def _update_system_ui(
         self,

@@ -10,10 +10,10 @@ from typing import Any
 class VisageConfig:
     refresh_interval: float = 1.0
     enabled_widgets: list[str] = field(default_factory=lambda: [
-        "cpu", "memory", "disk", "network", "gpu", "sensors", "processes",
+        "cpu", "memory", "disk", "network", "gpu", "sensors", "battery", "processes",
     ])
     widget_order: list[str] = field(default_factory=lambda: [
-        "cpu", "memory", "disk", "network", "gpu", "sensors", "processes",
+        "cpu", "memory", "disk", "network", "gpu", "sensors", "battery", "processes",
     ])
     thresholds: dict[str, Any] = field(default_factory=lambda: {
         "cpu": {"red": 80, "yellow": 50},
