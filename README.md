@@ -53,12 +53,13 @@ Shows live metrics in a terminal UI:
 
 | Section | Shows |
 |---------|-------|
-| **CPU** | Total usage bar, per-core breakdown with color-coded indicators |
+| **CPU** | Total usage bar, per-core breakdown, model name, frequency, uptime, context switches |
 | **Memory** | RAM bar with used/total, swap usage |
 | **Disk** | Read/write throughput in real time |
 | **Network** | Download/upload speeds |
 | **GPU** | SM/memory utilization, clocks, power, temperature, roofline analysis (when present) |
-| **Processes** | Top processes sorted by CPU usage |
+| **Sensors** | CPU temperature and RAPL power consumption |
+| **Processes** | Top processes with sort, tree view, filtering, detail panel, signal sending |
 
 **Controls:**
 
@@ -67,6 +68,13 @@ Shows live metrics in a terminal UI:
 | `q` | Quit |
 | `r` | Force refresh |
 | `d` | Cycle refresh speed (0.5s → 1s → 2s → 5s) |
+| `up`/`down` | Navigate process list |
+| `s` | Cycle sort mode (CPU → MEM → PID → NAME) |
+| `t` | Toggle tree view |
+| `/` | Filter/search processes |
+| `Enter` | Toggle detail panel for selected process |
+| `x` | Send signal to selected process |
+| `Esc` | Close detail/filter/signal panel |
 
 ### Benchmark Mode
 

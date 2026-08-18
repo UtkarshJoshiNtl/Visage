@@ -129,7 +129,13 @@ class VisageApp(App):
         proc_widget = self._widget("processes")
         if proc_widget is None:
             return
-        proc_data = proc_col.collect()
+        proc_data = proc_col.collect(
+            top_n=30,
+            sort_by=proc_widget._sort_by,
+            sort_reverse=proc_widget._sort_reverse,
+            filter_str=proc_widget._filter_str,
+            tree_mode=proc_widget._tree_mode,
+        )
         self.call_from_thread(proc_widget.update_data, proc_data)
 
     @work(thread=True, exclusive=True, group="sensor")
