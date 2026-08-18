@@ -3,7 +3,7 @@
 import psutil
 
 
-def collect(top_n: int = 8) -> list[dict]:
+def collect(top_n: int = 20) -> list[dict]:
     processes: list[dict] = []
     for proc in psutil.process_iter(["name", "cpu_percent", "memory_percent"]):
         try:

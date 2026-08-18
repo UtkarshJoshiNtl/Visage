@@ -193,7 +193,9 @@ def _collect_amd(h: Any) -> dict[str, Any]:
     try:
         pwr = amdsmi.amdsmi_get_power_info(h)
         power_w = float(getattr(pwr, "current_socket_power", 0))
-        power_max_w = float(getattr(pwr, "average_socket_power", 0))
+        power_max_w = float(getattr(pwr, "max_socket_power", 0))
+        if power_max_w <= 0:
+            power_max_w = float(getattr(pwr, "average_socket_power", 0))
     except Exception:
         power_w = 0.0
         power_max_w = 0.0

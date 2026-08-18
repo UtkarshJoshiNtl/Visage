@@ -5,15 +5,26 @@ eliminating the psutil dependency. Opens /proc/stat once at module init
 and rewinds via seek(0) on each tick to avoid open/close overhead.
 """
 
+import os
 import sys
+import time
+from pathlib import Path
 from typing import TextIO
 
 _STAT_PATH = "/proc/stat"
+_UPTIME_PATH = "/proc/uptime"
 _CPUFREQ_BASE = "/sys/devices/system/cpu"
+_CPUINFO_PATH = "/proc/cpuinfo"
 
 _fd: TextIO | None = None
 _cpu_count: int = 0
 _prev: dict[str, tuple[int, int]] = {}
+_prev_ctx: int = 0
+_prev_intr: int = 0
+_prev_softirq: int = 0
+_prev_time: float = 0.0
+_model_name: str = ""
+_model_found: bool = False
 
 
 def _get_fd():
@@ -36,18 +47,69 @@ def _parse_jiffies(line: str) -> tuple[int, int]:
     return total, idle
 
 
-def _read_cpufreq() -> float:
+def _read_cpufreq() -> tuple[float, float, float]:
+    cur = 0.0
+    mn = 0.0
+    mx = 0.0
     try:
-        with open(f"{_CPUFREQ_BASE}/cpu0/cpufreq/scaling_cur_freq") as f:
-            return float(f.read().strip()) / 1000.0
+        entries = sorted(Path(_CPUFREQ_BASE).glob("cpu*/cpufreq/scaling_cur_freq"))
+        if entries:
+            vals = []
+            for e in entries:
+                try:
+                    vals.append(float(e.read_text().strip()) / 1000.0)
+                except (OSError, ValueError):
+                    continue
+            if vals:
+                cur = sum(vals) / len(vals)
+    except (OSError, FileNotFoundError):
+        pass
+    try:
+        policy = Path(_CPUFREQ_BASE) / "cpufreq" / "policy0"
+        mn = float((policy / "scaling_min_freq").read_text().strip()) / 1000.0
     except (OSError, FileNotFoundError, ValueError):
+        pass
+    try:
+        policy = Path(_CPUFREQ_BASE) / "cpufreq" / "policy0"
+        mx = float((policy / "scaling_max_freq").read_text().strip()) / 1000.0
+    except (OSError, FileNotFoundError, ValueError):
+        pass
+    return cur, mn, mx
+
+
+def _read_model_name() -> str:
+    global _model_name, _model_found
+    if _model_found:
+        return _model_name
+    _model_found = True
+    try:
+        with open(_CPUINFO_PATH) as f:
+            for line in f:
+                if line.startswith("model name"):
+                    _model_name = line.split(":", 1)[1].strip()
+                    return _model_name
+    except OSError:
+        pass
+    return ""
+
+
+def _read_uptime() -> float:
+    try:
+        with open(_UPTIME_PATH) as f:
+            return float(f.read().split()[0])
+    except (OSError, ValueError):
         return 0.0
 
 
 def collect() -> dict:
-    global _cpu_count, _prev
+    global _cpu_count, _prev, _prev_ctx, _prev_intr, _prev_softirq, _prev_time
 
     fd = _get_fd()
+    now = time.monotonic()
+
+    model = _read_model_name()
+    uptime = _read_uptime()
+
     if fd is None:
         return {
             "percent": 0.0,
@@ -57,9 +119,14 @@ def collect() -> dict:
             "freq_min": 0.0,
             "freq_max": 0.0,
             "ctx_switches": 0,
+            "ctx_per_sec": 0.0,
             "interrupts": 0,
+            "interrupts_per_sec": 0.0,
             "soft_interrupts": 0,
+            "soft_per_sec": 0.0,
             "syscalls": 0,
+            "model": model,
+            "uptime": uptime,
         }
     fd.seek(0)
 
@@ -87,6 +154,8 @@ def collect() -> dict:
 
     _cpu_count = len(cores)
 
+    dt_wall = now - _prev_time if _prev_time > 0 else 0.0
+
     percent = 0.0
     if "cpu" in _prev:
         pt, pi = _prev["cpu"]
@@ -109,17 +178,34 @@ def collect() -> dict:
         _prev[key] = (total, idle)
         per_cpu.append(max(0.0, min(pct, 100.0)))
 
-    freq = _read_cpufreq()
+    ctx_per_sec = 0.0
+    intr_per_sec = 0.0
+    soft_per_sec = 0.0
+    if dt_wall > 0 and _prev_time > 0:
+        ctx_per_sec = max(0.0, (ctx - _prev_ctx) / dt_wall)
+        intr_per_sec = max(0.0, (intr - _prev_intr) / dt_wall)
+        soft_per_sec = max(0.0, (softirq - _prev_softirq) / dt_wall)
+    _prev_ctx = ctx
+    _prev_intr = intr
+    _prev_softirq = softirq
+    _prev_time = now
+
+    freq_cur, freq_min, freq_max = _read_cpufreq()
 
     return {
         "percent": max(0.0, min(percent, 100.0)),
         "per_cpu": per_cpu,
         "count": _cpu_count,
-        "freq_current": freq,
-        "freq_min": 0.0,
-        "freq_max": 0.0,
+        "freq_current": freq_cur,
+        "freq_min": freq_min,
+        "freq_max": freq_max,
         "ctx_switches": ctx,
+        "ctx_per_sec": ctx_per_sec,
         "interrupts": intr,
+        "interrupts_per_sec": intr_per_sec,
         "soft_interrupts": softirq,
+        "soft_per_sec": soft_per_sec,
         "syscalls": procs,
+        "model": model,
+        "uptime": uptime,
     }

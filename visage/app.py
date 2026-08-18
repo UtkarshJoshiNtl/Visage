@@ -11,6 +11,7 @@ from visage.collectors import memory as mem_col
 from visage.collectors import network as net_col
 from visage.collectors import gpu as gpu_col
 from visage.collectors import process as proc_col
+from visage.collectors.sensors import collect as collect_sensors
 from visage.alert import AlertEngine
 from visage.config import load_config
 from visage.util import DeltaTracker
@@ -20,6 +21,7 @@ from visage.widgets.gpu import GpuWidget
 from visage.widgets.memory import MemoryWidget
 from visage.widgets.network import NetworkWidget
 from visage.widgets.processes import ProcessesWidget
+from visage.widgets.sensors import SensorsWidget
 
 
 class VisageApp(App):
@@ -51,6 +53,7 @@ class VisageApp(App):
         "disk": DiskWidget,
         "network": NetworkWidget,
         "gpu": GpuWidget,
+        "sensors": SensorsWidget,
         "processes": ProcessesWidget,
     }
 
@@ -92,6 +95,7 @@ class VisageApp(App):
         self.fetch_system_metrics()
         self._sys_timer = self.set_interval(self._interval, self.fetch_system_metrics)
         self.set_interval(2.0, self.fetch_process_metrics)
+        self.set_interval(self._interval * 3, self.fetch_sensor_metrics)
 
     def _fire_alert(self, message: str) -> None:
         self.call_from_thread(self.notify, message, timeout=5)
@@ -128,6 +132,14 @@ class VisageApp(App):
         proc_data = proc_col.collect()
         self.call_from_thread(proc_widget.update_data, proc_data)
 
+    @work(thread=True, exclusive=True, group="sensor")
+    def fetch_sensor_metrics(self) -> None:
+        sensor_widget = self._widget("sensors")
+        if sensor_widget is None:
+            return
+        sensor_data = collect_sensors()
+        self.call_from_thread(sensor_widget.update_data, sensor_data)
+
     def _update_system_ui(
         self,
         cpu_data: dict,
@@ -150,6 +162,7 @@ class VisageApp(App):
     def action_refresh_now(self) -> None:
         self.fetch_system_metrics()
         self.fetch_process_metrics()
+        self.fetch_sensor_metrics()
 
     def action_cycle_delay(self) -> None:
         speeds = {0.5: "0.5s", 1.0: "1s", 2.0: "2s", 5.0: "5s"}
