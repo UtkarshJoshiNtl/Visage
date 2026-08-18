@@ -80,6 +80,10 @@ class HistoryBuffer:
         span = hi - lo if hi > lo else 1.0
         return [(v - lo) / span for v in vals]
 
+    def normalize_pct(self) -> list[float]:
+        """Normalize using fixed 0-100 scale for percentage values."""
+        return [min(v / 100.0, 1.0) for v in self.values]
+
 
 _SPARKLINE_CHARS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
 
@@ -99,3 +103,129 @@ def render_sparkline(values: list[float], width: int = 12) -> str:
         indices = [round(i * (n - 1) / (width - 1)) for i in range(width)]
     chars = [_SPARKLINE_CHARS[min(7, max(0, round(values[i] * 7)))] for i in indices]
     return "".join(chars)
+
+
+_BRAILLE_BASE = 0x2800
+_BRAILLE_DOTS = [
+    (0, 0), (0, 1), (0, 2), (0, 3),
+    (1, 0), (1, 1), (1, 2), (1, 3),
+    (2, 0), (2, 1), (2, 2), (2, 3),
+]
+
+
+def render_braille_graph(values: list[float], width: int = 20, height: int = 3) -> str:
+    """Render normalised floats (0..1) as a braille graph.
+
+    Each braille character is 2 dots wide and 4 dots tall.
+    Returns a string of braille characters representing the graph.
+    """
+    if not values or width < 1 or height < 1:
+        return ""
+
+    n = len(values)
+    if n < 2:
+        if values:
+            v = values[0]
+            filled_rows = int(v * height)
+            lines = []
+            for row in range(height):
+                line = ""
+                for col in range(width):
+                    if row >= (height - filled_rows):
+                        line += chr(_BRAILLE_BASE + 0b00000011)
+                    else:
+                        line += " "
+                lines.append(line)
+            return "\n".join(lines)
+        return ""
+
+    if width > n:
+        width = n
+
+    indices = [round(i * (n - 1) / (width - 1)) if width > 1 else 0 for i in range(width)]
+    col_values = [values[i] for i in indices]
+
+    lines = []
+    for row in range(height):
+        line = ""
+        for col_idx, v in enumerate(col_values):
+            y_float = v * height
+            y_top = row + 1
+            y_bottom = row
+
+            dots = 0
+            for dot_idx, (bx, by) in enumerate(_BRAILLE_DOTS):
+                dot_y = (3 - by)
+                if by % 1 == 0:
+                    dot_world_y = (dot_y + row * 0) if False else 0
+                dot_real_y = (height - 1 - row) * 1.0 + (1.0 - by / 3.0) * (1.0 / height * 3)
+                actual_y = (row + (by / 3.0)) / height * 1.0
+                pass
+
+            grid = [[0] * 2 for _ in range(4)]
+            for gx in range(2):
+                for gy in range(4):
+                    gy_world = (row + gy / 3.0) / height
+                    gx_world = (col_idx + gx * 0.5) / width
+                    if gy_world >= (1.0 - v):
+                        grid[gy][gx] = 1
+
+            code = _BRAILLE_BASE
+            for dot_idx, (bx, by) in enumerate(_BRAILLE_DOTS):
+                if grid[by][bx]:
+                    code |= (1 << dot_idx)
+            line += chr(code)
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
+def render_block_graph(values: list[float], width: int = 20, height: int = 3) -> str:
+    """Render normalised floats (0..1) using half-block characters.
+
+    Uses \u2584 (lower half) and \u2588 (full block) for vertical resolution.
+    """
+    if not values or width < 1 or height < 1:
+        return ""
+
+    n = len(values)
+    if n < 2:
+        v = values[0] if values else 0
+        filled = int(v * height * 2)
+        lines = []
+        for row in range(height):
+            line = ""
+            for col in range(width):
+                level = (height - 1 - row) * 2
+                if filled > level + 1:
+                    line += "\u2588"
+                elif filled > level:
+                    line += "\u2584"
+                else:
+                    line += " "
+            lines.append(line)
+        return "\n".join(lines)
+
+    if width > n:
+        width = n
+
+    indices = [round(i * (n - 1) / (width - 1)) if width > 1 else 0 for i in range(width)]
+    col_values = [values[i] for i in indices]
+
+    lines = []
+    for row in range(height):
+        line = ""
+        for v in col_values:
+            filled_cells = v * height * 2
+            cell_bottom = (height - 1 - row) * 2
+            cell_top = cell_bottom + 1
+
+            if filled_cells >= cell_top + 1:
+                line += "\u2588"
+            elif filled_cells > cell_bottom:
+                line += "\u2584"
+            else:
+                line += " "
+        lines.append(line)
+
+    return "\n".join(lines)

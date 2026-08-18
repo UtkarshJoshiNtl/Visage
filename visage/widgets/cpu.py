@@ -1,11 +1,11 @@
-"""CPU usage widget — progress bar, percentage, per-core breakdown."""
+"""CPU usage widget — progress bar, per-core mini-graphs, freq, uptime."""
 
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import Label, ProgressBar, Static
 from textual.widget import Widget
 
-from visage.util import HistoryBuffer, format_percent, render_sparkline
+from visage.util import HistoryBuffer, format_percent, render_block_graph, render_sparkline
 
 
 def _fmt_uptime(seconds: float) -> str:
@@ -26,6 +26,7 @@ class CpuWidget(Widget):
     def __init__(self):
         super().__init__()
         self._cpu_hist = HistoryBuffer(60)
+        self._core_hists: list[HistoryBuffer] = []
         self._red = 80.0
         self._yellow = 50.0
         self._model = ""
@@ -53,6 +54,7 @@ class CpuWidget(Widget):
                 )
                 yield Static(id="cpu-pct", classes="metric-value")
             yield Static(id="cpu-freq", classes="metric-detail")
+            yield Static(id="cpu-graph", classes="metric-graph")
             yield Static(id="cpu-detail", classes="metric-detail")
             yield Static(id="cpu-stats", classes="metric-detail")
 
@@ -62,15 +64,94 @@ class CpuWidget(Widget):
         self._bar = self.query_one("#cpu-bar", ProgressBar)
         self._pct = self.query_one("#cpu-pct", Static)
         self._freq_label = self.query_one("#cpu-freq", Static)
+        self._graph = self.query_one("#cpu-graph", Static)
         self._detail = self.query_one("#cpu-detail", Static)
         self._stats = self.query_one("#cpu-stats", Static)
 
     def watch_percent(self, value: float) -> None:
         self._bar.progress = min(value, 100.0)
-        spark = render_sparkline(self._cpu_hist.normalize(), 15)
+        spark = render_sparkline(self._cpu_hist.normalize_pct(), 15)
         self._pct.update(f"{format_percent(value)}  {spark}")
 
     def watch_per_cpu(self, cores: list[float]) -> None:
+        while len(self._core_hists) < len(cores):
+            self._core_hists.append(HistoryBuffer(60))
+        for i, p in enumerate(cores):
+            self._core_hists[i].push(p)
+
+        self._render_graph(cores)
+        self._render_detail(cores)
+
+    def _render_graph(self, cores: list[float]) -> None:
+        if not cores:
+            self._graph.update("")
+            return
+
+        n_cores = len(cores)
+        if n_cores <= 8:
+            cols_per_row = n_cores
+            rows_needed = 1
+        elif n_cores <= 16:
+            cols_per_row = 8
+            rows_needed = 2
+        else:
+            cols_per_row = 8
+            rows_needed = (n_cores + 7) // 8
+
+        graph_width = min(20, max(10, 60 // max(cols_per_row, 1)))
+        graph_height = 2
+
+        graphs = []
+        for i in range(min(n_cores, cols_per_row * rows_needed)):
+            hist = self._core_hists[i] if i < len(self._core_hists) else None
+            if hist and len(hist.values) >= 2:
+                norm = hist.normalize_pct()
+                g = render_block_graph(norm, width=graph_width, height=graph_height)
+                graphs.append((i, g))
+            else:
+                graphs.append((i, ""))
+
+        lines = []
+        for row_start in range(0, len(graphs), cols_per_row):
+            row_graphs = graphs[row_start:row_start + cols_per_row]
+            if not row_graphs:
+                continue
+
+            max_lines = max((g.count("\n") + 1 for _, g in row_graphs if g), default=1)
+            if max_lines < 1:
+                max_lines = 1
+
+            for line_idx in range(max_lines):
+                parts = []
+                for core_idx, g in row_graphs:
+                    g_lines = g.split("\n") if g else []
+                    if line_idx < len(g_lines):
+                        parts.append(g_lines[line_idx])
+                    else:
+                        parts.append(" " * graph_width)
+                    parts.append(" ")
+
+                header_line = ""
+                if line_idx == 0:
+                    header_parts = []
+                    for core_idx, _ in row_graphs:
+                        c_pct = cores[core_idx] if core_idx < len(cores) else 0
+                        if c_pct >= self._red:
+                            label = f"[red]C{core_idx}:{c_pct:.0f}%[/]"
+                        elif c_pct >= self._yellow:
+                            label = f"[yellow]C{core_idx}:{c_pct:.0f}%[/]"
+                        else:
+                            label = f"[green]C{core_idx}:{c_pct:.0f}%[/]"
+                        header_parts.append(label)
+                        header_parts.append(" ")
+                    header_line = "".join(header_parts)
+                    lines.append(header_line)
+
+                lines.append("".join(parts))
+
+        self._graph.update("\n".join(lines))
+
+    def _render_detail(self, cores: list[float]) -> None:
         parts = []
         for i, p in enumerate(cores):
             label = f"C{i}:{p:.0f}%"
@@ -91,9 +172,10 @@ class CpuWidget(Widget):
         model = data.get("model", "")
         if model and model != self._model:
             self._model = model
-            if len(model) > 40:
-                model = model[:39] + "\u2026"
-            self._title.update(f"CPU  [dim]{model}[/]")
+            display = model
+            if len(display) > 40:
+                display = display[:39] + "\u2026"
+            self._title.update(f"CPU  [dim]{display}[/]")
 
         uptime = data.get("uptime", 0.0)
         if uptime > 0:

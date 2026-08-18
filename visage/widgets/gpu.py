@@ -79,6 +79,7 @@ class GpuWidget(Widget):
             with Horizontal(classes="metric-bar-row"):
                 yield ProgressBar(id="gpu-mem-bar", total=100, show_eta=False, show_percentage=False)
                 yield Static(id="gpu-mem-pct", classes="metric-value")
+            yield Static(id="gpu-sparklines", classes="metric-detail")
             yield Static(id="gpu-power-temp", classes="metric-detail")
             yield Static(id="gpu-clocks", classes="metric-detail")
             yield Static(id="gpu-memory", classes="metric-detail")
@@ -91,6 +92,7 @@ class GpuWidget(Widget):
         self._sm_pct = self.query_one("#gpu-sm-pct", Static)
         self._mem_bar = self.query_one("#gpu-mem-bar", ProgressBar)
         self._mem_pct = self.query_one("#gpu-mem-pct", Static)
+        self._sparklines = self.query_one("#gpu-sparklines", Static)
         self._power_temp = self.query_one("#gpu-power-temp", Static)
         self._clocks = self.query_one("#gpu-clocks", Static)
         self._memory = self.query_one("#gpu-memory", Static)
@@ -112,6 +114,7 @@ class GpuWidget(Widget):
             self._sm_pct.update("")
             self._mem_bar.progress = 0
             self._mem_pct.update("")
+            self._sparklines.update("")
             self._power_temp.update("")
             self._clocks.update("")
             self._memory.update("")
@@ -119,7 +122,7 @@ class GpuWidget(Widget):
             self._bound.update("")
             for w in (
                 self._sm_bar, self._mem_bar,
-                self._power_temp, self._clocks,
+                self._sparklines, self._power_temp, self._clocks,
                 self._memory, self._roofline, self._bound,
             ):
                 w.display = False
@@ -244,11 +247,6 @@ class GpuWidget(Widget):
         lines.append(f"Intensity: [bold]{self.arith_intensity:.1f}[/] FLOP/byte")
         lines.append(f"Ridge:     [bold]{self.ridge_point:.1f}[/] FLOP/byte")
 
-        sm_spark = render_sparkline(self._sm_hist.normalize(), 15)
-        mem_spark = render_sparkline(self._mem_hist.normalize(), 15)
-        if sm_spark or mem_spark:
-            lines.append(f"SM: {sm_spark}  Mem: {mem_spark}")
-
         lines.append("[dim]  \u2191 utilization-based estimate[/]")
 
         self._roofline.update("\n".join(lines))
@@ -262,13 +260,29 @@ class GpuWidget(Widget):
             tag = "[dim]Idle[/]"
         self._bound.update(f"Bound by: {tag}")
 
+    def _refresh_sparklines(self) -> None:
+        sm_spark = render_sparkline(self._sm_hist.normalize_pct(), 15)
+        mem_spark = render_sparkline(self._mem_hist.normalize_pct(), 15)
+        pwr_spark = render_sparkline(self._pwr_hist.normalize_pct(), 15)
+        parts = []
+        if sm_spark:
+            parts.append(f"SM: {sm_spark}")
+        if mem_spark:
+            parts.append(f"Mem: {mem_spark}")
+        if pwr_spark:
+            parts.append(f"Pwr: {pwr_spark}")
+        if parts:
+            self._sparklines.update("  ".join(parts))
+        else:
+            self._sparklines.update("")
+
     def update_data(self, data: dict) -> None:
         self.available = data.get("available", False)
         if not self.available:
             return
         for w in (
             self._sm_bar, self._mem_bar,
-            self._power_temp, self._clocks,
+            self._sparklines, self._power_temp, self._clocks,
             self._memory, self._roofline, self._bound,
         ):
             w.display = True
@@ -294,3 +308,4 @@ class GpuWidget(Widget):
         self.arith_intensity = data.get("arith_intensity", 0.0)
         self.ridge_point = data.get("ridge_point", 0.0)
         self.bound_by = data.get("bound_by", "")
+        self._refresh_sparklines()

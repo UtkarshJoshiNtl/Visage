@@ -44,6 +44,12 @@ Screen {
     margin: 0 0 0 0;
 }
 
+.metric-graph {
+    color: #7dcfff;
+    padding: 0 0 0 0;
+    margin: 0 0 0 0;
+}
+
 ProgressBar {
     width: 1fr;
     color: #7dcfff;
@@ -63,4 +69,10 @@ Header {
 Footer {
     background: #1a1b26;
     color: #565f89;
+}
+
+#proc-filter {
+    display: none;
+    margin: 0 0 0 0;
+    padding: 0 0 0 0;
 }
