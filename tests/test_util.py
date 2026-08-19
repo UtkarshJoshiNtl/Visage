@@ -6,6 +6,8 @@ from visage.util import (
     format_bytes,
     format_percent,
     format_rate,
+    render_block_graph,
+    render_braille_graph,
     render_sparkline,
     shorten_name,
 )
@@ -152,3 +154,93 @@ class TestHistoryBuffer:
         for _ in range(3):
             buf.push(5.0)
         assert buf.normalize() == [0.0, 0.0, 0.0]
+
+    def test_normalize_pct_empty(self):
+        assert HistoryBuffer().normalize_pct() == []
+
+    def test_normalize_pct_clamps_at_100(self):
+        buf = HistoryBuffer(3)
+        buf.push(50.0)
+        buf.push(100.0)
+        buf.push(150.0)
+        result = buf.normalize_pct()
+        assert result == [0.5, 1.0, 1.0]
+
+    def test_normalize_pct_zero_values(self):
+        buf = HistoryBuffer(3)
+        buf.push(0.0)
+        buf.push(0.0)
+        buf.push(0.0)
+        assert buf.normalize_pct() == [0.0, 0.0, 0.0]
+
+    def test_normalize_pct_single_value(self):
+        buf = HistoryBuffer(1)
+        buf.push(75.0)
+        assert buf.normalize_pct() == [0.75]
+
+
+class TestRenderBrailleGraph:
+    def test_empty(self):
+        assert render_braille_graph([]) == ""
+
+    def test_single_value(self):
+        result = render_braille_graph([0.5], width=1, height=1)
+        assert len(result) > 0
+
+    def test_zero_dimensions(self):
+        assert render_braille_graph([0.5], width=0, height=1) == ""
+        assert render_braille_graph([0.5], width=1, height=0) == ""
+
+    def test_full_height_fill(self):
+        result = render_braille_graph([1.0, 1.0, 1.0], width=3, height=2)
+        lines = result.split("\n")
+        assert len(lines) == 2
+
+    def test_width_clamped_to_data(self):
+        result = render_braille_graph([0.5, 0.8], width=10, height=2)
+        lines = result.split("\n")
+        for line in lines:
+            assert len(line) == 2
+
+    def test_returns_string(self):
+        result = render_braille_graph([0.1, 0.3, 0.5, 0.7, 0.9], width=5, height=3)
+        assert isinstance(result, str)
+        assert "\n" in result
+
+
+class TestRenderBlockGraph:
+    def test_empty(self):
+        assert render_block_graph([]) == ""
+
+    def test_single_value(self):
+        result = render_block_graph([0.5], width=1, height=1)
+        assert len(result) > 0
+
+    def test_zero_dimensions(self):
+        assert render_block_graph([0.5], width=0, height=1) == ""
+        assert render_block_graph([0.5], width=1, height=0) == ""
+
+    def test_full_height_fill(self):
+        result = render_block_graph([1.0, 1.0, 1.0], width=3, height=2)
+        lines = result.split("\n")
+        assert len(lines) == 2
+        for line in lines:
+            assert "\u2588" in line
+
+    def test_empty_fill(self):
+        result = render_block_graph([0.0, 0.0], width=2, height=1)
+        lines = result.split("\n")
+        assert len(lines) == 1
+        assert lines[0] == "  "
+
+    def test_half_fill(self):
+        result = render_block_graph([0.5], width=1, height=1)
+        lines = result.split("\n")
+        assert len(lines) == 1
+        assert "\u2584" in lines[0]
+
+    def test_width_clamped_to_data(self):
+        result = render_block_graph([0.5, 0.8], width=10, height=2)
+        lines = result.split("\n")
+        for line in lines:
+            assert len(line) == 2

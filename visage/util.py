@@ -107,9 +107,8 @@ def render_sparkline(values: list[float], width: int = 12) -> str:
 
 _BRAILLE_BASE = 0x2800
 _BRAILLE_DOTS = [
-    (0, 0), (0, 1), (0, 2), (0, 3),
-    (1, 0), (1, 1), (1, 2), (1, 3),
-    (2, 0), (2, 1), (2, 2), (2, 3),
+    (0, 0), (0, 1), (0, 2), (1, 0),
+    (1, 1), (1, 2), (0, 3), (1, 3),
 ]
 
 
@@ -149,24 +148,10 @@ def render_braille_graph(values: list[float], width: int = 20, height: int = 3) 
     for row in range(height):
         line = ""
         for col_idx, v in enumerate(col_values):
-            y_float = v * height
-            y_top = row + 1
-            y_bottom = row
-
-            dots = 0
-            for dot_idx, (bx, by) in enumerate(_BRAILLE_DOTS):
-                dot_y = (3 - by)
-                if by % 1 == 0:
-                    dot_world_y = (dot_y + row * 0) if False else 0
-                dot_real_y = (height - 1 - row) * 1.0 + (1.0 - by / 3.0) * (1.0 / height * 3)
-                actual_y = (row + (by / 3.0)) / height * 1.0
-                pass
-
             grid = [[0] * 2 for _ in range(4)]
             for gx in range(2):
                 for gy in range(4):
                     gy_world = (row + gy / 3.0) / height
-                    gx_world = (col_idx + gx * 0.5) / width
                     if gy_world >= (1.0 - v):
                         grid[gy][gx] = 1
 

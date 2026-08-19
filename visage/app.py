@@ -14,6 +14,7 @@ from visage.collectors import process as proc_col
 from visage.collectors.sensors import collect as collect_sensors
 from visage.collectors.battery import collect as collect_battery
 from visage.collectors.docker import collect as collect_docker
+from visage.collectors.psi import collect as collect_psi
 from visage.alert import AlertEngine
 from visage.config import load_config
 from visage.util import DeltaTracker
@@ -26,6 +27,7 @@ from visage.widgets.processes import ProcessesWidget
 from visage.widgets.sensors import SensorsWidget
 from visage.widgets.battery import BatteryWidget
 from visage.widgets.docker import DockerWidget
+from visage.widgets.psi import PsiWidget
 
 
 class VisageApp(App):
@@ -57,6 +59,7 @@ class VisageApp(App):
         "disk": DiskWidget,
         "network": NetworkWidget,
         "gpu": GpuWidget,
+        "psi": PsiWidget,
         "sensors": SensorsWidget,
         "battery": BatteryWidget,
         "docker": DockerWidget,
@@ -111,6 +114,7 @@ class VisageApp(App):
         self.set_interval(self._interval * 3, self.fetch_sensor_metrics)
         self.set_interval(5.0, self.fetch_battery_metrics)
         self.set_interval(3.0, self.fetch_docker_metrics)
+        self.set_interval(self._interval * 2, self.fetch_psi_metrics)
 
     def _fire_alert(self, message: str) -> None:
         self.call_from_thread(self.notify, message, timeout=5)
@@ -187,6 +191,14 @@ class VisageApp(App):
             return
         docker_data = collect_docker()
         self.call_from_thread(docker_widget.update_data, docker_data)
+
+    @work(thread=True, exclusive=True, group="psi")
+    def fetch_psi_metrics(self) -> None:
+        psi_widget = self._widget("psi")
+        if psi_widget is None:
+            return
+        psi_data = collect_psi()
+        self.call_from_thread(psi_widget.update_data, psi_data)
 
     def _update_system_ui(
         self,

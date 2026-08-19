@@ -160,15 +160,19 @@ def _run_export_continuous(path: str, interval: float) -> None:
     signal.signal(signal.SIGTERM, _stop)
 
     while running:
+        cpu_data = cpu.collect()
+        mem_data = memory.collect()
+        disk_data = disk.collect()
+        net_data = network.collect()
         snapshot = {
             "timestamp": time.time(),
-            "cpu_percent": cpu.collect().get("percent", 0),
-            "mem_percent": memory.collect().get("percent", 0),
-            "mem_used": memory.collect().get("used", 0),
-            "disk_read": disk.collect().get("total", {}).get("read_bytes", 0),
-            "disk_write": disk.collect().get("total", {}).get("write_bytes", 0),
-            "net_recv": network.collect().get("total", {}).get("bytes_recv", 0),
-            "net_sent": network.collect().get("total", {}).get("bytes_sent", 0),
+            "cpu_percent": cpu_data.get("percent", 0),
+            "mem_percent": mem_data.get("percent", 0),
+            "mem_used": mem_data.get("used", 0),
+            "disk_read": disk_data.get("total", {}).get("read_bytes", 0),
+            "disk_write": disk_data.get("total", {}).get("write_bytes", 0),
+            "net_recv": net_data.get("total", {}).get("bytes_recv", 0),
+            "net_sent": net_data.get("total", {}).get("bytes_sent", 0),
         }
         export_csv([snapshot], path)
         time.sleep(interval)

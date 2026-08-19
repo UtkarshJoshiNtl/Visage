@@ -29,13 +29,22 @@ _model_found: bool = False
 
 def _get_fd():
     global _fd
-    if _fd is None:
-        if sys.platform != "linux":
-            return None
+    if sys.platform != "linux":
+        return None
+    if _fd is not None:
         try:
-            _fd = open(_STAT_PATH)
-        except OSError:
-            return None
+            _fd.seek(0)
+            return _fd
+        except (OSError, ValueError):
+            try:
+                _fd.close()
+            except OSError:
+                pass
+            _fd = None
+    try:
+        _fd = open(_STAT_PATH)
+    except OSError:
+        return None
     return _fd
 
 
@@ -75,6 +84,20 @@ def _read_cpufreq() -> tuple[float, float, float]:
     except (OSError, FileNotFoundError, ValueError):
         pass
     return cur, mn, mx
+
+
+def _read_per_core_cpufreq() -> list[float]:
+    freqs: list[float] = []
+    try:
+        entries = sorted(Path(_CPUFREQ_BASE).glob("cpu*/cpufreq/scaling_cur_freq"))
+        for e in entries:
+            try:
+                freqs.append(float(e.read_text().strip()) / 1000.0)
+            except (OSError, ValueError):
+                freqs.append(0.0)
+    except (OSError, FileNotFoundError):
+        pass
+    return freqs
 
 
 def _read_model_name() -> str:
@@ -118,6 +141,7 @@ def collect() -> dict:
             "freq_current": 0.0,
             "freq_min": 0.0,
             "freq_max": 0.0,
+            "per_core_freq": [],
             "ctx_switches": 0,
             "ctx_per_sec": 0.0,
             "interrupts": 0,
@@ -191,6 +215,7 @@ def collect() -> dict:
     _prev_time = now
 
     freq_cur, freq_min, freq_max = _read_cpufreq()
+    per_core_freq = _read_per_core_cpufreq()
 
     return {
         "percent": max(0.0, min(percent, 100.0)),
@@ -199,6 +224,7 @@ def collect() -> dict:
         "freq_current": freq_cur,
         "freq_min": freq_min,
         "freq_max": freq_max,
+        "per_core_freq": per_core_freq,
         "ctx_switches": ctx,
         "ctx_per_sec": ctx_per_sec,
         "interrupts": intr,

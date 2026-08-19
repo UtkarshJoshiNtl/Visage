@@ -92,6 +92,10 @@ class ProcessesWidget(Widget):
 
     def on_key(self, event) -> None:
         if self._show_filter:
+            if event.key == "escape":
+                self._show_filter = False
+                self._filter_input.display = False
+                event.stop()
             return
 
         if self._show_signal:
