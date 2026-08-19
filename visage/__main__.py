@@ -5,10 +5,12 @@ Usage:
     python -m visage --benchmark  # Run benchmarks
     python -m visage --remote     # Start remote monitoring server
     python -m visage --export     # Snapshot metrics to JSON
+    python -m visage --export-continuous  # Continuous CSV export
     visage                        # Same as above (if installed)
 """
 
 import argparse
+import signal
 import sys
 import time
 
@@ -41,6 +43,17 @@ def main() -> None:
         help="Snapshot metrics once to JSON",
     )
     parser.add_argument(
+        "--export-continuous",
+        action="store_true",
+        help="Continuous CSV export at regular intervals",
+    )
+    parser.add_argument(
+        "--export-interval",
+        type=float,
+        default=5.0,
+        help="Interval in seconds for continuous export (default: 5.0)",
+    )
+    parser.add_argument(
         "--output",
         type=str,
         default="visage_snapshot.json",
@@ -60,6 +73,8 @@ def main() -> None:
         _run_remote(args.remote_port)
     elif args.export:
         _run_export(args.output)
+    elif args.export_continuous:
+        _run_export_continuous(args.output, args.export_interval)
     else:
         _run_dashboard(args.config)
 
@@ -112,6 +127,7 @@ def _run_remote(port: int) -> None:
 def _run_export(path: str) -> None:
     from visage.collectors import cpu, disk, gpu, memory, network, process
     from visage.collectors.sensors import collect as collect_sensors
+    from visage.collectors.battery import collect as collect_battery
     from visage.export.exporter import export_json
 
     snapshot = {
@@ -120,11 +136,44 @@ def _run_export(path: str) -> None:
         "disk": disk.collect(),
         "network": network.collect(),
         "gpu": gpu.collect(),
-        "processes": process.collect(),
+        "processes": process.collect(top_n=20),
         "sensors": collect_sensors(),
+        "battery": collect_battery(),
     }
     result = export_json(snapshot, path)
     print(f"Snapshot written to {result}")
+
+
+def _run_export_continuous(path: str, interval: float) -> None:
+    from visage.collectors import cpu, disk, memory, network
+    from visage.collectors.sensors import collect as collect_sensors
+    from visage.export.exporter import export_csv
+
+    print(f"Continuous export to {path} every {interval}s (Ctrl+C to stop)...")
+    running = True
+
+    def _stop(sig, frame):
+        nonlocal running
+        running = False
+
+    signal.signal(signal.SIGINT, _stop)
+    signal.signal(signal.SIGTERM, _stop)
+
+    while running:
+        snapshot = {
+            "timestamp": time.time(),
+            "cpu_percent": cpu.collect().get("percent", 0),
+            "mem_percent": memory.collect().get("percent", 0),
+            "mem_used": memory.collect().get("used", 0),
+            "disk_read": disk.collect().get("total", {}).get("read_bytes", 0),
+            "disk_write": disk.collect().get("total", {}).get("write_bytes", 0),
+            "net_recv": network.collect().get("total", {}).get("bytes_recv", 0),
+            "net_sent": network.collect().get("total", {}).get("bytes_sent", 0),
+        }
+        export_csv([snapshot], path)
+        time.sleep(interval)
+
+    print(f"\nExport stopped. Data written to {path}")
 
 
 if __name__ == "__main__":

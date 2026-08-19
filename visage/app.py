@@ -13,6 +13,7 @@ from visage.collectors import gpu as gpu_col
 from visage.collectors import process as proc_col
 from visage.collectors.sensors import collect as collect_sensors
 from visage.collectors.battery import collect as collect_battery
+from visage.collectors.docker import collect as collect_docker
 from visage.alert import AlertEngine
 from visage.config import load_config
 from visage.util import DeltaTracker
@@ -24,6 +25,7 @@ from visage.widgets.network import NetworkWidget
 from visage.widgets.processes import ProcessesWidget
 from visage.widgets.sensors import SensorsWidget
 from visage.widgets.battery import BatteryWidget
+from visage.widgets.docker import DockerWidget
 
 
 class VisageApp(App):
@@ -57,6 +59,7 @@ class VisageApp(App):
         "gpu": GpuWidget,
         "sensors": SensorsWidget,
         "battery": BatteryWidget,
+        "docker": DockerWidget,
         "processes": ProcessesWidget,
     }
 
@@ -107,6 +110,7 @@ class VisageApp(App):
         self.set_interval(2.0, self.fetch_process_metrics)
         self.set_interval(self._interval * 3, self.fetch_sensor_metrics)
         self.set_interval(5.0, self.fetch_battery_metrics)
+        self.set_interval(3.0, self.fetch_docker_metrics)
 
     def _fire_alert(self, message: str) -> None:
         self.call_from_thread(self.notify, message, timeout=5)
@@ -175,6 +179,14 @@ class VisageApp(App):
             return
         bat_data = collect_battery()
         self.call_from_thread(bat_widget.update_data, bat_data)
+
+    @work(thread=True, exclusive=True, group="docker")
+    def fetch_docker_metrics(self) -> None:
+        docker_widget = self._widget("docker")
+        if docker_widget is None:
+            return
+        docker_data = collect_docker()
+        self.call_from_thread(docker_widget.update_data, docker_data)
 
     def _update_system_ui(
         self,

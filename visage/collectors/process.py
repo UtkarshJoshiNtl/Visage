@@ -16,7 +16,7 @@ _SORT_KEYS = {
 }
 
 
-def _collect_one(proc: psutil.Process) -> dict[str, Any] | None:
+def _collect_one(proc: psutil.Process, with_io: bool = False) -> dict[str, Any] | None:
     try:
         info = proc.as_dict(
             attrs=["pid", "ppid", "name", "username", "cpu_percent",
@@ -36,7 +36,7 @@ def _collect_one(proc: psutil.Process) -> dict[str, Any] | None:
     cmdline = info.get("cmdline")
     cmdline_str = " ".join(cmdline) if cmdline else name
 
-    return {
+    data = {
         "pid": info.get("pid", 0),
         "ppid": info.get("ppid", 0),
         "name": name,
@@ -49,7 +49,23 @@ def _collect_one(proc: psutil.Process) -> dict[str, Any] | None:
         "threads": info.get("num_threads", 0),
         "start_time": info.get("create_time", 0.0),
         "cmdline": cmdline_str,
+        "io_read": 0,
+        "io_write": 0,
     }
+
+    if with_io and sys.platform == "linux":
+        try:
+            io_path = f"/proc/{info.get('pid', 0)}/io"
+            with open(io_path) as f:
+                for line in f:
+                    if line.startswith("read_bytes:"):
+                        data["io_read"] = int(line.split()[1])
+                    elif line.startswith("write_bytes:"):
+                        data["io_write"] = int(line.split()[1])
+        except (OSError, ValueError):
+            pass
+
+    return data
 
 
 def collect(
@@ -58,11 +74,12 @@ def collect(
     sort_reverse: bool = True,
     filter_str: str = "",
     tree_mode: bool = False,
+    with_io: bool = False,
 ) -> list[dict[str, Any]]:
     processes: list[dict[str, Any]] = []
 
     for proc in psutil.process_iter():
-        data = _collect_one(proc)
+        data = _collect_one(proc, with_io=with_io)
         if data is None:
             continue
         if filter_str:
