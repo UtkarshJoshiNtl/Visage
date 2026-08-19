@@ -53,12 +53,14 @@ Shows live metrics in a terminal UI:
 
 | Section | Shows |
 |---------|-------|
-| **CPU** | Total usage bar, per-core breakdown, model name, frequency, uptime, context switches |
-| **Memory** | RAM bar with used/total, swap usage |
-| **Disk** | Read/write throughput in real time |
-| **Network** | Download/upload speeds |
-| **GPU** | SM/memory utilization, clocks, power, temperature, roofline analysis (when present) |
-| **Sensors** | CPU temperature and RAPL power consumption |
+| **CPU** | Total usage bar, per-core mini-graphs with block rendering, model name, frequency, uptime, context switches |
+| **Memory** | RAM bar with used/total, swap usage, buffers/cached/reclaimable breakdown |
+| **Disk** | Per-partition read/write rates, usage bars with mount points and space info |
+| **Network** | Per-interface download/upload rates with IP addresses, total aggregate |
+| **GPU** | SM/memory utilization, clocks, power, temperature, roofline analysis, sparkline graphs |
+| **Sensors** | CPU temperature readings and RAPL power consumption |
+| **Battery** | Charge level with bar and status (when present) |
+| **Docker** | Container CPU/Memory/Net/Block I/O stats (when Docker available) |
 | **Processes** | Top processes with sort, tree view, filtering, detail panel, signal sending |
 
 **Controls:**
@@ -150,10 +152,19 @@ visage --remote
 # → serving on http://0.0.0.0:8090
 ```
 
-Exposes all metrics at `/metrics` as JSON over HTTP:
+Exposes all metrics at `/metrics` as JSON over HTTP, with per-metric endpoints and WebSocket streaming:
 
 ```bash
 curl http://localhost:8090/metrics
+curl http://localhost:8090/cpu
+curl http://localhost:8090/memory
+curl http://localhost:8090/gpu
+```
+
+WebSocket for real-time streaming:
+```bash
+# Connect via any WebSocket client
+wscat -c ws://localhost:8090/ws/metrics
 ```
 
 Endpoints:
@@ -162,7 +173,16 @@ Endpoints:
 |-------|-------------|
 | `GET /` | Service info |
 | `GET /metrics` | Full system snapshot |
+| `GET /cpu` | CPU metrics only |
+| `GET /memory` | Memory metrics only |
+| `GET /disk` | Disk metrics only |
+| `GET /network` | Network metrics only |
+| `GET /gpu` | GPU metrics only |
+| `GET /processes` | Process list |
+| `GET /sensors` | Temperature and power |
+| `GET /battery` | Battery status |
 | `GET /health` | Health check |
+| `WS /ws/metrics` | Real-time streaming |
 
 ### Export
 
@@ -174,6 +194,14 @@ visage --export --output /tmp/metrics.json
 ```
 
 Writes a one-shot snapshot of all metrics to a JSON file (ISO timestamped).
+
+### Continuous Export
+
+```bash
+visage --export-continuous --export-interval 5 --output metrics.csv
+```
+
+Writes metrics to CSV at regular intervals. Ctrl+C to stop.
 
 ## Architecture
 
@@ -286,7 +314,13 @@ pip install -e ".[dev]"
 - [x] GPU metrics (NVIDIA / AMD) with roofline analysis
 - [x] Historical graphs (sparklines)
 - [x] Config file (which metrics to show, thresholds) + alert rules
-- [ ] Docker support
+- [x] Docker support
+- [x] Interactive process management (sort, tree, filter, detail, signals)
+- [x] Per-disk and per-network interface breakdown
+- [x] Battery monitor
+- [x] Block graph rendering and per-core CPU mini-graphs
+- [x] WebSocket streaming for remote monitoring
+- [x] Continuous CSV export mode
 
 ## License
 
