@@ -13,7 +13,7 @@ is a real-time system performance dashboard for Linux, providing live monitoring
 .BR \-\-benchmark
 Run CPU, memory, and disk benchmarks.
 .TP
-.BR "\-\-remote"
+.BR \-\-remote
 Start the remote monitoring HTTP server (default port 8090).
 .TP
 .BI \-\-remote\-port " PORT"
@@ -28,12 +28,19 @@ Continuous CSV export at regular intervals.
 .BI \-\-export\-interval " SECS"
 Interval in seconds for continuous export (default: 5.0).
 .TP
+.BI \-\-export\-format " FORMAT"
+Export format: \fBjson\fR (single file) or \fBjsonl\fR (JSON lines, one per line). Default: json.
+.TP
 .BI \-\-output " PATH"
 Output path for \-\-export (default: visage_snapshot.json).
 .TP
 .BI \-\-config " PATH"
 Path to config JSON file.
+.TP
+.BR \-\-version
+Show version and exit.
 .SH KEYS
+.SS Global Keys
 .TP
 .B q
 Quit the dashboard.
@@ -46,18 +53,22 @@ Cycle refresh speed (0.5s, 1s, 2s, 5s).
 .TP
 .B t
 Cycle through color themes.
+.SS Process Keys
+.TP
+.B up/down
+Navigate process list.
+.TP
+.B PageUp/PageDown
+Page through process list (10 rows).
 .TP
 .B s
-Sort process table (CPU, Memory, PID, Name).
+Cycle sort mode (CPU, Memory, PID, Name). First press toggles direction.
 .TP
 .B a
 Toggle aggregate mode (group by process name).
 .TP
 .B t
 Toggle tree view for processes.
-.TP
-.B v
-Toggle vim keybinding mode.
 .TP
 .B l
 Toggle long command line display.
@@ -71,8 +82,24 @@ Filter processes by name.
 .B Enter
 Open/close process detail panel.
 .TP
+.B x
+Send signal to selected process.
+.TP
 .B Esc
-Close popups and vim mode.
+Close popups, filter, and vim mode.
+.SS Vim Mode (press v to enter)
+.TP
+.B j/k
+Move down/up one row.
+.TP
+.B h/l
+Move up/down 5 rows.
+.TP
+.B gg
+Jump to first process.
+.TP
+.B G
+Jump to last process.
 .SH FILES
 .TP
 .I visage.json
@@ -80,6 +107,9 @@ Local configuration file.
 .TP
 .I ~/.config/visage/config.json
 User configuration file.
+.TP
+.I ~/.visage.json
+Alternative user configuration file.
 .SH EXAMPLES
 .TP
 .B visage
@@ -90,6 +120,9 @@ Start remote server on port 9090.
 .TP
 .B visage \-\-export \-\-output metrics.json
 Export a single metrics snapshot.
+.TP
+.B visage \-\-export \-\-export\-format jsonl \-\-output metrics.jsonl
+Export as JSON Lines (append-friendly).
 .SH SEE ALSO
 .BR htop (1),
 .BR btop (1),

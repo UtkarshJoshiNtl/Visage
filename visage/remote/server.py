@@ -11,13 +11,15 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
-from visage.collectors import cpu, disk, memory, network, process
+from visage.collectors import cpu, disk, memory, network, process, gpu
 from visage.collectors.sensors import collect as collect_sensors
 from visage.collectors.battery import collect as collect_battery
+from visage.collectors.docker import collect as collect_docker
+from visage.collectors.psi import collect as collect_psi
 
 logger = logging.getLogger("visage.remote")
 
-app = FastAPI(title="Visage Remote", version="0.3.0")
+app = FastAPI(title="Visage Remote", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,7 +37,7 @@ async def _run_collect(collector_fn, *args, **kwargs):
 
 @app.get("/")
 async def root():
-    return {"service": "Visage Remote Monitoring", "version": "0.3.0"}
+    return {"service": "Visage Remote Monitoring", "version": "0.2.0"}
 
 
 @app.get("/metrics")
@@ -46,19 +48,25 @@ async def metrics():
         _run_collect(disk.collect),
         _run_collect(network.collect),
     )
-    proc_data, sensor_data, bat_data = await asyncio.gather(
+    proc_data, sensor_data, bat_data, gpu_data = await asyncio.gather(
         _run_collect(process.collect, top_n=20),
         _run_collect(collect_sensors),
         _run_collect(collect_battery),
+        _run_collect(gpu.collect),
     )
+    docker_data = await _run_collect(collect_docker)
+    psi_data = await _run_collect(collect_psi)
     return {
         "cpu": cpu_data,
         "memory": mem_data,
         "disk": disk_data,
         "network": net_data,
+        "gpu": gpu_data,
         "processes": proc_data,
         "sensors": sensor_data,
         "battery": bat_data,
+        "docker": docker_data,
+        "psi": psi_data,
     }
 
 
@@ -70,6 +78,7 @@ async def prometheus_metrics():
         _run_collect(disk.collect),
         _run_collect(network.collect),
     )
+    gpu_data = await _run_collect(gpu.collect)
     from visage.export.exporter import prometheus_format
     flat = {
         "cpu_percent": cpu_data.get("percent", 0),
@@ -81,6 +90,8 @@ async def prometheus_metrics():
         "disk_write_bytes": disk_data.get("total", {}).get("write_bytes", 0),
         "network_bytes_recv": net_data.get("total", {}).get("bytes_recv", 0),
         "network_bytes_sent": net_data.get("total", {}).get("bytes_sent", 0),
+        "gpu_sm_util": gpu_data.get("sm_util", 0),
+        "gpu_temp_c": gpu_data.get("temp_c", 0),
     }
     return PlainTextResponse(prometheus_format(flat))
 
