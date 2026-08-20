@@ -1,4 +1,4 @@
-"""Data exporter — snapshot system metrics to CSV or JSON."""
+"""Data exporter — snapshot system metrics to CSV, JSON, or log files."""
 
 import csv
 import json
@@ -7,11 +7,20 @@ from pathlib import Path
 from typing import Any
 
 
-def export_json(snapshot: dict[str, Any], path: str | Path) -> Path:
-    """Write a JSON snapshot."""
+def export_json(snapshot: dict[str, Any], path: str | Path, indent: int = 2) -> Path:
+    """Write a JSON snapshot with timestamp."""
     path = Path(path)
     data = {"timestamp": time.time(), **snapshot}
-    path.write_text(json.dumps(data, indent=2, default=str))
+    path.write_text(json.dumps(data, indent=indent, default=str))
+    return path
+
+
+def export_json_lines(path: str | Path, snapshot: dict[str, Any]) -> Path:
+    """Append a JSON-lines entry (one JSON object per line)."""
+    path = Path(path)
+    data = {"timestamp": time.time(), **snapshot}
+    with open(path, "a") as f:
+        f.write(json.dumps(data, default=str) + "\n")
     return path
 
 
@@ -42,3 +51,20 @@ def export_log(
     with open(path, "a") as f:
         f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
     return path
+
+
+def prometheus_format(metrics: dict[str, Any], prefix: str = "visage") -> str:
+    """Convert a metrics dict to Prometheus exposition format."""
+    lines: list[str] = []
+
+    def _flatten(obj: Any, prefix_parts: list[str]) -> None:
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                _flatten(v, prefix_parts + [k])
+        elif isinstance(obj, (int, float)):
+            name = "_".join(prefix_parts)
+            name = name.replace(".", "_").replace("-", "_")
+            lines.append(f"{prefix}_{name} {obj}")
+
+    _flatten(metrics, [])
+    return "\n".join(lines) + "\n" if lines else ""

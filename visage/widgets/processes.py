@@ -336,6 +336,11 @@ class ProcessesWidget(Widget):
             f"[bold]Nice:[/] {p.get('nice', 0)}  [bold]Threads:[/] {p.get('threads', 0)}",
             f"[bold]RSS:[/] {_fmt_rss(p.get('mem_rss', 0))}  [bold]Started:[/] {_fmt_time(p.get('start_time', 0))}",
         ]
+        io_read = p.get("io_read", 0)
+        io_write = p.get("io_write", 0)
+        if io_read or io_write:
+            from visage.util import format_bytes
+            lines.append(f"[bold]I/O:[/] R:{format_bytes(io_read)} W:{format_bytes(io_write)}")
         cmdline = p.get("cmdline", "")
         if cmdline and cmdline != p.get("name", ""):
             if len(cmdline) > 80:

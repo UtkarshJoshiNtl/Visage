@@ -1,0 +1,19 @@
+[meta]
+display_name = "Solarized"
+graph_style = "braille"
+
+[colors]
+bg = "#002b36"
+card = "#073642"
+border = "#586e75"
+accent = "#268bd2"
+text = "#839496"
+graph = "#2aa198"
+dim = "#586e75"
+bar = "#2aa198"
+red = "#dc322f"
+yellow = "#b58900"
+green = "#859900"
+cyan = "#2aa198"
+blue = "#268bd2"
+magenta = "#6c71c4"

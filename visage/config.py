@@ -25,6 +25,8 @@ class VisageConfig:
     })
     gpu_arch_override: dict[str, Any] | None = None
     alerts: list[dict[str, Any]] = field(default_factory=list)
+    theme: str = "default"
+    graph_style: str = "braille"
 
     @classmethod
     def defaults(cls) -> "VisageConfig":
@@ -70,6 +72,9 @@ def load_config(path: str | None = None) -> VisageConfig:
 
     alerts = raw.get("alerts", [])
 
+    theme = raw.get("theme", defaults.theme)
+    graph_style = raw.get("graph_style", defaults.graph_style)
+
     return VisageConfig(
         refresh_interval=refresh_interval,
         enabled_widgets=enabled_widgets,
@@ -77,4 +82,6 @@ def load_config(path: str | None = None) -> VisageConfig:
         thresholds=thresholds,
         gpu_arch_override=gpu_arch_override,
         alerts=alerts,
+        theme=theme,
+        graph_style=graph_style,
     )

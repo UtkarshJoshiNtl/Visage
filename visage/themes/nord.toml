@@ -1,0 +1,19 @@
+[meta]
+display_name = "Nord"
+graph_style = "braille"
+
+[colors]
+bg = "#2e3440"
+card = "#3b4252"
+border = "#434c5e"
+accent = "#88c0d0"
+text = "#eceff4"
+graph = "#88c0d0"
+dim = "#4c566a"
+bar = "#88c0d0"
+red = "#bf616a"
+yellow = "#ebcb8b"
+green = "#a3be8c"
+cyan = "#88c0d0"
+blue = "#5e81ac"
+magenta = "#b48ead"

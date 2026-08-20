@@ -1,0 +1,19 @@
+[meta]
+display_name = "Gruvbox"
+graph_style = "block"
+
+[colors]
+bg = "#282828"
+card = "#3c3836"
+border = "#504945"
+accent = "#fabd2f"
+text = "#ebdbb2"
+graph = "#83a598"
+dim = "#928374"
+bar = "#83a598"
+red = "#fb4934"
+yellow = "#fabd2f"
+green = "#b8bb26"
+cyan = "#8ec07c"
+blue = "#83a598"
+magenta = "#d3869b"

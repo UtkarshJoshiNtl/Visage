@@ -17,7 +17,8 @@ from visage.collectors.docker import collect as collect_docker
 from visage.collectors.psi import collect as collect_psi
 from visage.alert import AlertEngine
 from visage.config import load_config
-from visage.util import DeltaTracker
+from visage.theme import list_themes, get_theme, get_default_theme, generate_tcss
+from visage.util import DeltaTracker, get_graph_style
 from visage.widgets.cpu import CpuWidget
 from visage.widgets.disk import DiskWidget
 from visage.widgets.gpu import GpuWidget
@@ -39,6 +40,7 @@ class VisageApp(App):
         ("q", "quit", "Quit"),
         ("r", "refresh_now", "Refresh"),
         ("d", "cycle_delay", "Speed"),
+        ("t", "cycle_theme", "Theme"),
     ]
 
     def __init__(self, config_path: str | None = None) -> None:
@@ -52,6 +54,12 @@ class VisageApp(App):
         self._alert_engine.set_rules(self._cfg.alerts)
         self._alert_engine.set_action(self._fire_alert)
         self._widgets: dict[str, object] = {}
+        self._theme_names = list_themes()
+        self._theme_idx = 0
+        self._graph_style = get_graph_style(self._cfg.graph_style)
+
+        if self._cfg.theme in self._theme_names:
+            self._theme_idx = self._theme_names.index(self._cfg.theme)
 
     _WIDGET_CLASSES = {
         "cpu": CpuWidget,
@@ -115,6 +123,19 @@ class VisageApp(App):
         self.set_interval(5.0, self.fetch_battery_metrics)
         self.set_interval(3.0, self.fetch_docker_metrics)
         self.set_interval(self._interval * 2, self.fetch_psi_metrics)
+
+    def _apply_theme(self, theme_name: str) -> None:
+        theme = get_theme(theme_name) or get_default_theme()
+        tcss = generate_tcss(theme)
+        try:
+            style_path = self.css_path
+            if style_path:
+                from pathlib import Path
+                p = Path(style_path)
+                p.write_text(tcss)
+        except Exception:
+            pass
+        self.refresh()
 
     def _fire_alert(self, message: str) -> None:
         self.call_from_thread(self.notify, message, timeout=5)
@@ -234,3 +255,14 @@ class VisageApp(App):
         if self._sys_timer is not None:
             self._sys_timer.stop()
         self._sys_timer = self.set_interval(self._interval, self.fetch_system_metrics)
+
+    def action_cycle_theme(self) -> None:
+        if not self._theme_names:
+            self.notify("No themes available", timeout=2)
+            return
+        self._theme_idx = (self._theme_idx + 1) % len(self._theme_names)
+        name = self._theme_names[self._theme_idx]
+        theme = get_theme(name)
+        display = theme.display_name if theme else name
+        self._apply_theme(name)
+        self.notify(f"Theme: {display}", timeout=2)

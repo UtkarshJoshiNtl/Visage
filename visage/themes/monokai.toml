@@ -1,0 +1,19 @@
+[meta]
+display_name = "Monokai"
+graph_style = "block"
+
+[colors]
+bg = "#272822"
+card = "#3e3d32"
+border = "#49483e"
+accent = "#a6e22e"
+text = "#f8f8f2"
+graph = "#66d9ef"
+dim = "#75715e"
+bar = "#66d9ef"
+red = "#f92672"
+yellow = "#e6db74"
+green = "#a6e22e"
+cyan = "#66d9ef"
+blue = "#66d9ef"
+magenta = "#ae81ff"

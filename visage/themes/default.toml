@@ -1,0 +1,19 @@
+[meta]
+display_name = "Tokyo Night"
+graph_style = "braille"
+
+[colors]
+bg = "#1a1b26"
+card = "#24283b"
+border = "#3b4261"
+accent = "#7aa2f7"
+text = "#a9b1d6"
+graph = "#7dcfff"
+dim = "#565f89"
+bar = "#7dcfff"
+red = "#f7768e"
+yellow = "#e0af68"
+green = "#9ece6a"
+cyan = "#7dcfff"
+blue = "#7aa2f7"
+magenta = "#bb9af7"

@@ -1,12 +1,12 @@
 [project]
 name = "visage"
-version = "0.1.0"
+version = "0.2.0"
 description = "System Performance Dashboard — live TUI for CPU, memory, disk, network, and processes"
 authors = [{ name = "Anomaly Co." }]
 license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.11"
-keywords = ["dashboard", "monitoring", "tui", "system", "performance"]
+keywords = ["dashboard", "monitoring", "tui", "system", "performance", "linux", "gpu", "process"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console :: Curses",
@@ -20,6 +20,8 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: System :: Monitoring",
     "Topic :: System :: Benchmarking",
+    "Topic :: System :: Hardware",
+    "Topic :: Utilities",
 ]
 dependencies = [
     "psutil>=6.0.0",
@@ -39,8 +41,13 @@ asyncio_mode = "auto"
 [project.urls]
 Homepage = "https://github.com/anomalyco/visage"
 Repository = "https://github.com/anomalyco/visage"
+Issues = "https://github.com/anomalyco/visage/issues"
+Documentation = "https://github.com/anomalyco/visage#readme"
 
 [project.scripts]
+visage = "visage.__main__:main"
+
+[project.entry-points.console_scripts]
 visage = "visage.__main__:main"
 
 [build-system]
@@ -49,3 +56,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["visage*"]
+
+[tool.setuptools.package-data]
+visage = ["themes/*.toml"]

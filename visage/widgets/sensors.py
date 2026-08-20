@@ -1,4 +1,4 @@
-"""Temperature and power sensors widget."""
+"""Temperature, fan, and power sensors widget."""
 
 from textual.containers import Vertical
 from textual.reactive import reactive
@@ -57,6 +57,18 @@ class SensorsWidget(Widget):
                     temp_parts.append(f"{label}: {_color_temp(current)}")
             if temp_parts:
                 lines.append("  ".join(temp_parts))
+
+        fans = data.get("fans", {})
+        fan_entries = fans.get("entries", []) if isinstance(fans, dict) else []
+        if fan_entries:
+            fan_parts = []
+            for entry in fan_entries[:4]:
+                label = entry.get("label", "fan")
+                rpm = entry.get("rpm", 0)
+                if rpm > 0:
+                    fan_parts.append(f"{label}: {rpm} RPM")
+            if fan_parts:
+                lines.append("  ".join(fan_parts))
 
         power = data.get("power", {})
         power_entries = power.get("entries", []) if isinstance(power, dict) else []

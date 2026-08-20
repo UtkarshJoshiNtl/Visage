@@ -1,0 +1,101 @@
+.\" Visage — System Performance Dashboard
+.TH VISAGE 1 "2026-08-20" "Visage 0.2.0" "User Commands"
+.SH NAME
+visage \- system performance dashboard
+.SH SYNOPSIS
+.B visage
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B Visage
+is a real-time system performance dashboard for Linux, providing live monitoring of CPU, memory, disk, network, GPU, sensors, and processes in a beautiful terminal UI.
+.SH OPTIONS
+.TP
+.BR \-\-benchmark
+Run CPU, memory, and disk benchmarks.
+.TP
+.BR "\-\-remote"
+Start the remote monitoring HTTP server (default port 8090).
+.TP
+.BI \-\-remote\-port " PORT"
+Remote server port (default: 8090).
+.TP
+.BR \-\-export
+Snapshot metrics once to JSON.
+.TP
+.BR \-\-export\-continuous
+Continuous CSV export at regular intervals.
+.TP
+.BI \-\-export\-interval " SECS"
+Interval in seconds for continuous export (default: 5.0).
+.TP
+.BI \-\-output " PATH"
+Output path for \-\-export (default: visage_snapshot.json).
+.TP
+.BI \-\-config " PATH"
+Path to config JSON file.
+.SH KEYS
+.TP
+.B q
+Quit the dashboard.
+.TP
+.B r
+Force refresh all metrics.
+.TP
+.B d
+Cycle refresh speed (0.5s, 1s, 2s, 5s).
+.TP
+.B t
+Cycle through color themes.
+.TP
+.B s
+Sort process table (CPU, Memory, PID, Name).
+.TP
+.B a
+Toggle aggregate mode (group by process name).
+.TP
+.B t
+Toggle tree view for processes.
+.TP
+.B v
+Toggle vim keybinding mode.
+.TP
+.B l
+Toggle long command line display.
+.TP
+.B n
+Renice selected process.
+.TP
+.B /
+Filter processes by name.
+.TP
+.B Enter
+Open/close process detail panel.
+.TP
+.B Esc
+Close popups and vim mode.
+.SH FILES
+.TP
+.I visage.json
+Local configuration file.
+.TP
+.I ~/.config/visage/config.json
+User configuration file.
+.SH EXAMPLES
+.TP
+.B visage
+Start the live dashboard.
+.TP
+.B visage \-\-remote \-\-remote\-port 9090
+Start remote server on port 9090.
+.TP
+.B visage \-\-export \-\-output metrics.json
+Export a single metrics snapshot.
+.SH SEE ALSO
+.BR htop (1),
+.BR btop (1),
+.BR free (1),
+.BR vmstat (8)
+.SH AUTHOR
+Anomaly Co.
+.SH LICENSE
+MIT

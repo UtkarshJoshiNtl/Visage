@@ -1,0 +1,19 @@
+[meta]
+display_name = "Dracula"
+graph_style = "braille"
+
+[colors]
+bg = "#282a36"
+card = "#343746"
+border = "#44475a"
+accent = "#bd93f9"
+text = "#f8f8f2"
+graph = "#8be9fd"
+dim = "#6272a4"
+bar = "#8be9fd"
+red = "#ff5555"
+yellow = "#f1fa8c"
+green = "#50fa7b"
+cyan = "#8be9fd"
+blue = "#6272a4"
+magenta = "#ff79c6"

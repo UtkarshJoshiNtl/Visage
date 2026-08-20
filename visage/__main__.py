@@ -54,6 +54,12 @@ def main() -> None:
         help="Interval in seconds for continuous export (default: 5.0)",
     )
     parser.add_argument(
+        "--export-format",
+        choices=["json", "jsonl"],
+        default="json",
+        help="Export format: json (single file) or jsonl (JSON lines, one per line)",
+    )
+    parser.add_argument(
         "--output",
         type=str,
         default="visage_snapshot.json",
@@ -65,6 +71,11 @@ def main() -> None:
         default=None,
         help="Path to config JSON",
     )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="visage 0.2.0",
+    )
     args = parser.parse_args()
 
     if args.benchmark:
@@ -72,7 +83,7 @@ def main() -> None:
     elif args.remote:
         _run_remote(args.remote_port)
     elif args.export:
-        _run_export(args.output)
+        _run_export(args.output, args.export_format)
     elif args.export_continuous:
         _run_export_continuous(args.output, args.export_interval)
     else:
@@ -124,11 +135,11 @@ def _run_remote(port: int) -> None:
     serve(port=port)
 
 
-def _run_export(path: str) -> None:
+def _run_export(path: str, fmt: str = "json") -> None:
     from visage.collectors import cpu, disk, gpu, memory, network, process
     from visage.collectors.sensors import collect as collect_sensors
     from visage.collectors.battery import collect as collect_battery
-    from visage.export.exporter import export_json
+    from visage.export.exporter import export_json, export_json_lines
 
     snapshot = {
         "cpu": cpu.collect(),
@@ -140,13 +151,16 @@ def _run_export(path: str) -> None:
         "sensors": collect_sensors(),
         "battery": collect_battery(),
     }
-    result = export_json(snapshot, path)
+
+    if fmt == "jsonl":
+        result = export_json_lines(path, snapshot)
+    else:
+        result = export_json(snapshot, path)
     print(f"Snapshot written to {result}")
 
 
 def _run_export_continuous(path: str, interval: float) -> None:
     from visage.collectors import cpu, disk, memory, network
-    from visage.collectors.sensors import collect as collect_sensors
     from visage.export.exporter import export_csv
 
     print(f"Continuous export to {path} every {interval}s (Ctrl+C to stop)...")

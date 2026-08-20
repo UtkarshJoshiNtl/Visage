@@ -1,5 +1,6 @@
 """Shared formatting utilities."""
 
+import os
 from collections import deque
 from typing import Sequence
 
@@ -163,6 +164,26 @@ def render_braille_graph(values: list[float], width: int = 20, height: int = 3) 
         lines.append(line)
 
     return "\n".join(lines)
+
+
+def detect_ascii_fallback() -> bool:
+    """Detect if we're in an SSH session or terminal that lacks Unicode/braille support."""
+    if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_CLIENT"):
+        return True
+    term = os.environ.get("TERM", "").lower()
+    if "linux" in term and "256" not in term:
+        return True
+    locale = os.environ.get("LANG", "").lower()
+    if locale and "utf" not in locale:
+        return True
+    return False
+
+
+def get_graph_style(configured: str = "braille") -> str:
+    """Get effective graph style, falling back to ASCII if needed."""
+    if configured == "auto" or (configured == "braille" and detect_ascii_fallback()):
+        return "ascii"
+    return configured
 
 
 def render_block_graph(values: list[float], width: int = 20, height: int = 3) -> str:

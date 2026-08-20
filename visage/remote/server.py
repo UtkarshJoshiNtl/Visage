@@ -9,6 +9,7 @@ from functools import partial
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 
 from visage.collectors import cpu, disk, memory, network, process
 from visage.collectors.sensors import collect as collect_sensors
@@ -16,7 +17,7 @@ from visage.collectors.battery import collect as collect_battery
 
 logger = logging.getLogger("visage.remote")
 
-app = FastAPI(title="Visage Remote", version="0.2.0")
+app = FastAPI(title="Visage Remote", version="0.3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -34,7 +35,7 @@ async def _run_collect(collector_fn, *args, **kwargs):
 
 @app.get("/")
 async def root():
-    return {"service": "Visage Remote Monitoring", "version": "0.2.0"}
+    return {"service": "Visage Remote Monitoring", "version": "0.3.0"}
 
 
 @app.get("/metrics")
@@ -59,6 +60,29 @@ async def metrics():
         "sensors": sensor_data,
         "battery": bat_data,
     }
+
+
+@app.get("/metrics/prometheus")
+async def prometheus_metrics():
+    cpu_data, mem_data, disk_data, net_data = await asyncio.gather(
+        _run_collect(cpu.collect),
+        _run_collect(memory.collect),
+        _run_collect(disk.collect),
+        _run_collect(network.collect),
+    )
+    from visage.export.exporter import prometheus_format
+    flat = {
+        "cpu_percent": cpu_data.get("percent", 0),
+        "cpu_count": cpu_data.get("count", 0),
+        "memory_percent": mem_data.get("percent", 0),
+        "memory_used": mem_data.get("used", 0),
+        "memory_total": mem_data.get("total", 0),
+        "disk_read_bytes": disk_data.get("total", {}).get("read_bytes", 0),
+        "disk_write_bytes": disk_data.get("total", {}).get("write_bytes", 0),
+        "network_bytes_recv": net_data.get("total", {}).get("bytes_recv", 0),
+        "network_bytes_sent": net_data.get("total", {}).get("bytes_sent", 0),
+    }
+    return PlainTextResponse(prometheus_format(flat))
 
 
 @app.get("/cpu")
