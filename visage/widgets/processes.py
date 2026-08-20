@@ -53,12 +53,18 @@ class ProcessesWidget(Widget):
         self._sort_reverse = True
         self._filter_str = ""
         self._tree_mode = False
+        self._aggregate_mode = False
         self._selected_idx = 0
         self._show_detail = False
         self._show_filter = False
         self._show_signal = False
+        self._show_renice = False
         self._signal_pid = 0
+        self._renice_pid = 0
         self._detail_data: dict[str, Any] | None = None
+        self._vim_mode = False
+        self._vim_pending: str = ""
+        self._long_cmdline = False
 
     def compose(self):
         with Vertical(classes="metric-card"):
@@ -80,14 +86,22 @@ class ProcessesWidget(Widget):
         self._refresh_banner()
 
     def _refresh_banner(self) -> None:
+        if not hasattr(self, "_banner"):
+            return
         sort_label = self.SORT_LABELS.get(self._sort_by, "CPU%")
         rev = "\u25bc" if self._sort_reverse else "\u25b2"
         parts = [f"[bold]Sort:[/] {rev}{sort_label} [dim]s[/]"]
         if self._tree_mode:
             parts.append("[bold]Tree[/]")
+        if self._aggregate_mode:
+            parts.append("[bold]Agg[/]")
+        if self._long_cmdline:
+            parts.append("[bold]Long[/]")
+        if self._vim_mode:
+            parts.append("[bold]VIM[/]")
         if self._filter_str:
             parts.append(f"[bold]Filter:[/] {self._filter_str}")
-        parts.append("[dim]/search  x:signal  t:tree  enter:detail[/]")
+        parts.append("[dim]/search  x:signal  t:tree  a:agg  v:vim  l:long  n:nice  enter:detail[/]")
         self._banner.update("  ".join(parts))
 
     def on_key(self, event) -> None:
@@ -123,8 +137,31 @@ class ProcessesWidget(Widget):
                 pass
             return
 
+        if self._show_renice:
+            if event.key == "escape":
+                self._show_renice = False
+                self._signal_label.display = False
+                self._signal_label.update("")
+                event.stop()
+                return
+            try:
+                val = int(event.key)
+                if 0 <= val <= 9:
+                    self._apply_renice(self._renice_pid, val)
+                    self._show_renice = False
+                    self._signal_label.display = False
+                    self._signal_label.update("")
+                    event.stop()
+            except (ValueError, TypeError):
+                pass
+            return
+
         procs = self.processes
         if not procs:
+            return
+
+        if self._vim_mode:
+            self._handle_vim_key(event)
             return
 
         if event.key == "up":
@@ -137,14 +174,46 @@ class ProcessesWidget(Widget):
                 self._selected_idx += 1
                 self._refresh_table()
                 event.stop()
+        elif event.key == "pageup":
+            self._selected_idx = max(0, self._selected_idx - 10)
+            self._refresh_table()
+            event.stop()
+        elif event.key == "pagedown":
+            self._selected_idx = min(len(procs) - 1, self._selected_idx + 10)
+            self._refresh_table()
+            event.stop()
         elif event.key == "s":
             self._cycle_sort()
             event.stop()
         elif event.key == "t":
             self._tree_mode = not self._tree_mode
+            self._aggregate_mode = False
             self._selected_idx = 0
             self._refresh_banner()
             self._refetch()
+            event.stop()
+        elif event.key == "a":
+            self._aggregate_mode = not self._aggregate_mode
+            self._tree_mode = False
+            self._selected_idx = 0
+            self._refresh_banner()
+            self._refetch()
+            event.stop()
+        elif event.key == "l":
+            self._long_cmdline = not self._long_cmdline
+            self._refresh_table()
+            self._refresh_banner()
+            event.stop()
+        elif event.key == "n":
+            if self._selected_idx < len(procs):
+                pid = procs[self._selected_idx].get("pid", 0)
+                if pid > 0:
+                    self._show_renice_picker(pid)
+                    event.stop()
+        elif event.key == "v":
+            self._vim_mode = True
+            self._vim_pending = ""
+            self._refresh_banner()
             event.stop()
         elif event.key == "slash":
             self._show_filter = True
@@ -165,6 +234,63 @@ class ProcessesWidget(Widget):
                 if pid > 0:
                     self._show_signal_picker(pid)
                     event.stop()
+
+    def _handle_vim_key(self, event) -> None:
+        procs = self.processes
+        key = event.key
+
+        if key == "escape":
+            self._vim_mode = False
+            self._vim_pending = ""
+            self._refresh_banner()
+            event.stop()
+            return
+
+        if key in ("j", "down"):
+            if self._selected_idx < len(procs) - 1:
+                self._selected_idx += 1
+                self._refresh_table()
+            event.stop()
+        elif key in ("k", "up"):
+            if self._selected_idx > 0:
+                self._selected_idx -= 1
+                self._refresh_table()
+            event.stop()
+        elif key == "g":
+            if self._vim_pending == "g":
+                self._selected_idx = 0
+                self._refresh_table()
+                self._vim_pending = ""
+            else:
+                self._vim_pending = "g"
+        elif key == "G":
+            self._selected_idx = max(0, len(procs) - 1)
+            self._refresh_table()
+            self._vim_pending = ""
+        elif key in ("h", "left"):
+            self._selected_idx = max(0, self._selected_idx - 5)
+            self._refresh_table()
+            event.stop()
+        elif key in ("l", "right"):
+            self._selected_idx = min(len(procs) - 1, self._selected_idx + 5)
+            self._refresh_table()
+            event.stop()
+        else:
+            self._vim_pending = ""
+
+    def _show_renice_picker(self, pid: int) -> None:
+        self._show_renice = True
+        self._renice_pid = pid
+        self._signal_label.display = True
+        self._signal_label.update(f"[bold]Set nice value for PID {pid} (0-9):[/]")
+
+    def _apply_renice(self, pid: int, nice_val: int) -> None:
+        import os
+        try:
+            os.nice(nice_val)
+            self.notify(f"Set nice={nice_val} for PID {pid}", timeout=3)
+        except (OSError, PermissionError) as e:
+            self.notify(f"Renice failed: {e}", timeout=3, severity="error")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "proc-filter":
@@ -226,16 +352,17 @@ class ProcessesWidget(Widget):
         self._signal_label.update(f"[bold]Send signal to PID {pid}:[/]  {sigs}")
 
     def _refetch(self) -> None:
-        self._do_fetch(self._sort_by, self._sort_reverse, self._filter_str, self._tree_mode)
+        self._do_fetch(self._sort_by, self._sort_reverse, self._filter_str, self._tree_mode, self._aggregate_mode)
 
     @work(thread=True, exclusive=True, group="proc-manual")
-    def _do_fetch(self, sort_by, sort_reverse, filter_str, tree_mode) -> None:
+    def _do_fetch(self, sort_by, sort_reverse, filter_str, tree_mode, aggregate_mode) -> None:
         data = collect(
             top_n=30,
             sort_by=sort_by,
             sort_reverse=sort_reverse,
             filter_str=filter_str,
             tree_mode=tree_mode,
+            aggregate_mode=aggregate_mode,
         )
         self.call_from_thread(self._set_data, data)
 
@@ -245,6 +372,8 @@ class ProcessesWidget(Widget):
     def watch_processes(self, procs: list[dict[str, Any]]) -> None:
         if self._selected_idx >= len(procs):
             self._selected_idx = max(0, len(procs) - 1)
+        if not hasattr(self, "_table"):
+            return
         self._refresh_table()
         if self._show_detail and self._detail_data:
             for p in procs:
@@ -254,6 +383,8 @@ class ProcessesWidget(Widget):
                     break
 
     def _refresh_table(self) -> None:
+        if not hasattr(self, "_table"):
+            return
         procs = self.processes
         table = Table(box=None, padding=(0, 1), show_header=True, show_edge=False)
         table.add_column("", width=1)
@@ -263,6 +394,7 @@ class ProcessesWidget(Widget):
         table.add_column("Mem%", justify="right", style="cyan", ratio=1)
         table.add_column("RSS", justify="right", style="dim", ratio=1)
         table.add_column("Thr", justify="right", style="dim", ratio=1)
+        table.add_column("Nice", justify="right", style="dim", ratio=1)
         table.add_column("Time", justify="right", style="dim", ratio=1)
 
         for i, p in enumerate(procs):
@@ -277,24 +409,35 @@ class ProcessesWidget(Widget):
             if len(name) > 32:
                 name = name[:31] + "\u2026"
 
+            cmdline = p.get("cmdline", "")
+            if self._long_cmdline and cmdline and cmdline != name:
+                if len(cmdline) > 48:
+                    cmdline = cmdline[:47] + "\u2026"
+                name = cmdline
+
             elapsed = _fmt_time(p.get("start_time", 0))
             rss = _fmt_rss(p.get("mem_rss", 0))
+            nice = p.get("nice", 0)
+            count = p.get("count", 0)
+            pid_str = str(p.get("pid", ""))
+            if count > 1:
+                pid_str = f"({count})"
 
             if i == self._selected_idx:
                 table.add_row(
-                    marker, f"[reverse]{name}[/]", str(p.get("pid", "")),
+                    marker, f"[reverse]{name}[/]", pid_str,
                     f"{p.get('cpu', 0):.1f}", f"{p.get('memory', 0):.1f}",
-                    rss, str(p.get("threads", "")), elapsed,
+                    rss, str(p.get("threads", "")), str(nice), elapsed,
                 )
             else:
                 table.add_row(
-                    marker, name, str(p.get("pid", "")),
+                    marker, name, pid_str,
                     f"{p.get('cpu', 0):.1f}", f"{p.get('memory', 0):.1f}",
-                    rss, str(p.get("threads", "")), elapsed,
+                    rss, str(p.get("threads", "")), str(nice), elapsed,
                 )
 
         if not procs:
-            table.add_row("", "(no matching processes)", "", "", "", "", "", "")
+            table.add_row("", "(no matching processes)", "", "", "", "", "", "", "")
 
         self._table.update(table)
 

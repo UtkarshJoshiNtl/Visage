@@ -74,6 +74,7 @@ def collect(
     sort_reverse: bool = True,
     filter_str: str = "",
     tree_mode: bool = False,
+    aggregate_mode: bool = False,
     with_io: bool = False,
 ) -> list[dict[str, Any]]:
     processes: list[dict[str, Any]] = []
@@ -90,12 +91,57 @@ def collect(
                 continue
         processes.append(data)
 
+    if aggregate_mode:
+        return _aggregate_by_name(processes, top_n, sort_by, sort_reverse)
+
     if tree_mode:
         return _build_tree(processes, top_n)
 
     sort_fn = _SORT_KEYS.get(sort_by, _SORT_KEYS["cpu"])
     processes.sort(key=sort_fn, reverse=sort_reverse)
     return processes[:top_n]
+
+
+def _aggregate_by_name(
+    processes: list[dict],
+    top_n: int,
+    sort_by: str,
+    sort_reverse: bool,
+) -> list[dict[str, Any]]:
+    groups: dict[str, dict[str, Any]] = {}
+
+    for p in processes:
+        name = p.get("name", "")
+        if name not in groups:
+            groups[name] = {
+                "name": name,
+                "pid": 0,
+                "ppid": 0,
+                "username": p.get("username", ""),
+                "cpu": 0.0,
+                "memory": 0.0,
+                "mem_rss": 0,
+                "status": p.get("status", ""),
+                "nice": p.get("nice", 0),
+                "threads": 0,
+                "start_time": p.get("start_time", 0.0),
+                "cmdline": p.get("cmdline", ""),
+                "count": 0,
+                "pids": [],
+            }
+        g = groups[name]
+        g["cpu"] += p.get("cpu", 0.0)
+        g["memory"] += p.get("memory", 0.0)
+        g["mem_rss"] += p.get("mem_rss", 0)
+        g["threads"] += p.get("threads", 0)
+        g["count"] += 1
+        g["pids"].append(p.get("pid", 0))
+
+    result = list(groups.values())
+
+    sort_fn = _SORT_KEYS.get(sort_by, _SORT_KEYS["cpu"])
+    result.sort(key=sort_fn, reverse=sort_reverse)
+    return result[:top_n]
 
 
 def _build_tree(processes: list[dict], top_n: int) -> list[dict]:

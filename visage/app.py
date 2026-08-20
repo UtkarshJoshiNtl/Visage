@@ -165,6 +165,7 @@ class VisageApp(App):
             sort_reverse=proc_widget._sort_reverse,
             filter_str=proc_widget._filter_str,
             tree_mode=proc_widget._tree_mode,
+            aggregate_mode=proc_widget._aggregate_mode,
         )
         self.call_from_thread(proc_widget.update_data, proc_data)
 
