@@ -60,12 +60,12 @@ Shows live metrics in a terminal UI:
 | **CPU** | Total usage bar, per-core mini-graphs, model name, frequency, uptime, context switches |
 | **Memory** | RAM bar with used/total, swap usage, buffers/cached/reclaimable breakdown |
 | **Disk** | Per-partition read/write rates, usage bars with mount points and space info |
-| **Network** | Per-interface download/upload rates with IP addresses, cumulative totals |
-| **GPU** | SM/memory utilization, clocks, power, temperature, roofline analysis, sparkline graphs |
+| **Network** | Per-interface download/upload rates with IP addresses, cumulative totals, socket tracking |
+| **GPU** | Multi-GPU array support, SM/memory utilization, clocks, power, temperature, PCIe bandwidth, roofline analysis, sparkline graphs |
 | **Sensors** | CPU temperature, NVMe temps, fan speeds (hwmon), RAPL power consumption |
 | **Battery** | Charge level with bar and status (when present) |
 | **Docker** | Container CPU/Memory/Net/Block I/O stats (when Docker available) |
-| **Processes** | Top processes with sort, tree view, aggregate mode, filtering, detail panel, signal sending, vim navigation |
+| **Processes** | Top processes with AI framework tagging (vLLM, PyTorch, Ollama, etc.), sort, tree view, aggregate mode, filtering, deep-dive modal, signal sending, vim navigation |
 
 ### Controls
 
@@ -77,6 +77,7 @@ Shows live metrics in a terminal UI:
 | `r` | Force refresh all metrics |
 | `d` | Cycle refresh speed (0.5s → 1s → 2s → 5s) |
 | `t` | Cycle color themes (Tokyo Night → Dracula → Gruvbox → Nord → Monokai → Solarized) |
+| `g` | Cycle active GPU in multi-GPU setups |
 
 **Process widget** (when focused):
 
@@ -89,11 +90,12 @@ Shows live metrics in a terminal UI:
 | `t` | Toggle tree view (parent/child hierarchy) |
 | `v` | Toggle vim keybinding mode |
 | `l` | Toggle long command line display |
+| `i` | Open interactive Process Diagnostics deep-dive modal (FDs, sockets, threads, memory) |
 | `n` | Renice selected process (set priority) |
-| `/` | Filter/search processes by name |
+| `/` | Filter/search processes by name or AI framework |
 | `Enter` | Toggle detail panel for selected process |
 | `x` | Send signal to selected process |
-| `Esc` | Close detail/filter/signal panel |
+| `Esc` | Close detail/filter/signal panel or modal |
 
 ### Vim Mode
 
@@ -146,6 +148,28 @@ Features:
 - **Noise filtering** — runs N iterations, computes μ and σ, flags if any CV exceeds threshold
 
 All features degrade gracefully when unprivileged (WSL2, no root).
+
+### CI/CD Performance Regression Gatekeeper
+
+Visage acts as a deterministic performance gatekeeper in automated CI/CD workflows:
+
+```bash
+# Basic performance assertion on dedicated core 3
+visage --ci-test ./build/my_engine --core 3 --iterations 10 --max-cv 2.0
+
+# Compare against saved baseline with max allowed regressions
+visage --ci-test ./build/my_engine \
+  --baseline ./benchmarks/baseline.json \
+  --max-ipc-drop 5.0 \
+  --max-time-increase 5.0 \
+  --output-md ./github_summary.md \
+  --output-json ./ci_report.json
+
+# Save current run as new baseline
+visage --ci-test ./build/my_engine --save-baseline ./benchmarks/baseline.json
+```
+
+Outputs GitHub Actions Markdown summaries with silicon IPC, LLC cache misses, and statistical confidence intervals, exiting `0` on success and `1` on regression.
 
 ### Themes
 
