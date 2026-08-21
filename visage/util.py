@@ -1,6 +1,7 @@
 """Shared formatting utilities."""
 
 import os
+import time
 from collections import deque
 from typing import Sequence
 
@@ -36,20 +37,32 @@ def shorten_name(name: str, max_len: int = 18) -> str:
 
 
 class DeltaTracker:
-    """Compute deltas between successive collections for rate computation."""
+    """Compute per-second rates between successive counter snapshots.
+
+    Deltas are divided by wall-clock time between updates so displayed
+    rates stay correct when tick timing jitters (slow collection, manual
+    refresh, interval changes). Counter resets clamp to 0 instead of
+    going negative.
+    """
 
     def __init__(self) -> None:
         self._prev: dict[str, float] = {}
+        self._prev_time: float = 0.0
 
-    def update(self, current: dict[str, float]) -> dict[str, float]:
+    def update(self, current: dict[str, float], *, now: float | None = None) -> dict[str, float]:
+        if now is None:
+            now = time.monotonic()
         if not self._prev:
             self._prev = {k: float(v) for k, v in current.items()}
+            self._prev_time = now
             return {k: 0.0 for k in current}
+        dt = now - self._prev_time
         result = {
-            k: float(v) - self._prev.get(k, float(v))
+            k: max(0.0, (float(v) - self._prev.get(k, float(v))) / dt) if dt > 0 else 0.0
             for k, v in current.items()
         }
         self._prev = {k: float(v) for k, v in current.items()}
+        self._prev_time = now
         return result
 
 

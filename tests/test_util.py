@@ -76,32 +76,44 @@ class TestShortenName:
 class TestDeltaTracker:
     def test_first_update_returns_zeros(self):
         dt = DeltaTracker()
-        result = dt.update({"a": 10.0, "b": 20.0})
+        result = dt.update({"a": 10.0, "b": 20.0}, now=100.0)
         assert result == {"a": 0.0, "b": 0.0}
 
-    def test_second_update_returns_deltas(self):
+    def test_second_update_returns_per_second_rates(self):
         dt = DeltaTracker()
-        dt.update({"a": 10.0, "b": 20.0})
-        result = dt.update({"a": 15.0, "b": 25.0})
-        assert result == {"a": 5.0, "b": 5.0}
+        dt.update({"a": 10.0, "b": 20.0}, now=100.0)
+        result = dt.update({"a": 15.0, "b": 25.0}, now=105.0)
+        assert result == {"a": 1.0, "b": 1.0}  # 5 units over 5s
 
-    def test_delta_wraps_to_zero_on_reset(self):
+    def test_rate_scales_with_elapsed_time(self):
         dt = DeltaTracker()
-        dt.update({"a": 100.0})
-        result = dt.update({"a": 50.0})
-        assert result["a"] == -50.0
+        dt.update({"a": 0.0}, now=0.0)
+        result = dt.update({"a": 100.0}, now=4.0)
+        assert result["a"] == 25.0
+
+    def test_counter_reset_clamps_to_zero(self):
+        dt = DeltaTracker()
+        dt.update({"a": 100.0}, now=1.0)
+        result = dt.update({"a": 50.0}, now=2.0)
+        assert result["a"] == 0.0
+
+    def test_zero_elapsed_time_returns_zeros(self):
+        dt = DeltaTracker()
+        dt.update({"a": 10.0}, now=5.0)
+        result = dt.update({"a": 15.0}, now=5.0)
+        assert result["a"] == 0.0
 
     def test_new_key_in_second_update(self):
         dt = DeltaTracker()
-        dt.update({"a": 10.0})
-        result = dt.update({"a": 15.0, "b": 5.0})
+        dt.update({"a": 10.0}, now=1.0)
+        result = dt.update({"a": 15.0, "b": 5.0}, now=2.0)
         assert result["a"] == 5.0
         assert result["b"] == 0.0  # first time seeing "b"
 
     def test_missing_key_in_second_update(self):
         dt = DeltaTracker()
-        dt.update({"a": 10.0, "b": 20.0})
-        result = dt.update({"a": 15.0})
+        dt.update({"a": 10.0, "b": 20.0}, now=1.0)
+        result = dt.update({"a": 15.0}, now=2.0)
         assert "b" not in result
 
     def test_converts_int_values_to_float(self):
@@ -109,6 +121,13 @@ class TestDeltaTracker:
         result = dt.update({"a": 10, "b": 20})
         for v in result.values():
             assert isinstance(v, float)
+
+    def test_defaults_to_monotonic_clock(self):
+        dt = DeltaTracker()
+        dt.update({"a": 0.0})
+        result = dt.update({"a": 1.0})
+        assert isinstance(result["a"], float)
+        assert result["a"] >= 0.0
 
 
 class TestRenderSparkline:
