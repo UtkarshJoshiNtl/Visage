@@ -48,6 +48,11 @@ app.add_middleware(
 _AUTH_TOKEN = os.environ.get("VISAGE_AUTH_TOKEN", "")
 _semaphore = asyncio.Semaphore(4)
 
+_CACHE_TTL_SECONDS = 1.0
+_snapshot_lock = asyncio.Lock()
+_snapshot: dict | None = None
+_snapshot_at = 0.0
+
 
 def _verify_token(request: Request) -> None:
     if not _AUTH_TOKEN:
@@ -64,13 +69,7 @@ async def _run_collect(collector_fn, *args, **kwargs):
     )
 
 
-@app.get("/")
-async def root():
-    return {"service": "Visage Remote Monitoring", "version": _VERSION}
-
-
-@app.get("/metrics", dependencies=[Depends(_verify_token)])
-async def metrics():
+async def _collect_all() -> dict:
     async with _semaphore:
         cpu_data, mem_data, disk_data, net_data = await asyncio.gather(
             _run_collect(cpu.collect),
@@ -86,53 +85,79 @@ async def metrics():
         )
         docker_data = await _run_collect(collect_docker)
         psi_data = await _run_collect(collect_psi)
-        return {
-            "cpu": cpu_data,
-            "memory": mem_data,
-            "disk": disk_data,
-            "network": net_data,
-            "gpu": gpu_data,
-            "processes": proc_data,
-            "sensors": sensor_data,
-            "battery": bat_data,
-            "docker": docker_data,
-            "psi": psi_data,
-        }
+    return {
+        "cpu": cpu_data,
+        "memory": mem_data,
+        "disk": disk_data,
+        "network": net_data,
+        "gpu": gpu_data,
+        "processes": proc_data,
+        "sensors": sensor_data,
+        "battery": bat_data,
+        "docker": docker_data,
+        "psi": psi_data,
+    }
+
+
+async def get_snapshot() -> dict:
+    """Return a cached system snapshot, refreshing when older than the TTL.
+
+    A single collection consumer keeps per-collector rate state (e.g. the
+    jiffy deltas in cpu.py) consistent no matter how many clients poll —
+    concurrent callers advancing shared collector state made CPU rates
+    depend on whoever polled last. Callers must treat the returned dict
+    as read-only.
+    """
+    global _snapshot, _snapshot_at
+    async with _snapshot_lock:
+        now = time.monotonic()
+        if _snapshot is None or (now - _snapshot_at) >= _CACHE_TTL_SECONDS:
+            _snapshot = await _collect_all()
+            _snapshot_at = time.monotonic()
+        return _snapshot
+
+
+@app.get("/")
+async def root():
+    return {"service": "Visage Remote Monitoring", "version": _VERSION}
+
+
+@app.get("/metrics", dependencies=[Depends(_verify_token)])
+async def metrics():
+    return await get_snapshot()
 
 
 @app.get("/metrics/prometheus", dependencies=[Depends(_verify_token)])
 async def prometheus_metrics():
-    async with _semaphore:
-        cpu_data, mem_data, disk_data, net_data = await asyncio.gather(
-            _run_collect(cpu.collect),
-            _run_collect(memory.collect),
-            _run_collect(disk.collect),
-            _run_collect(network.collect),
-        )
-        gpu_data = await _run_collect(gpu.collect)
-        from visage.export.exporter import prometheus_format
-        flat = {
-            "cpu_percent": cpu_data.get("percent", 0),
-            "cpu_count": cpu_data.get("count", 0),
-            "memory_percent": mem_data.get("percent", 0),
-            "memory_used": mem_data.get("used", 0),
-            "memory_total": mem_data.get("total", 0),
-            "disk_read_bytes": disk_data.get("total", {}).get("read_bytes", 0),
-            "disk_write_bytes": disk_data.get("total", {}).get("write_bytes", 0),
-            "network_bytes_recv": net_data.get("total", {}).get("bytes_recv", 0),
-            "network_bytes_sent": net_data.get("total", {}).get("bytes_sent", 0),
-            "gpu_count": gpu_data.get("gpu_count", 1 if gpu_data.get("available") else 0),
-            "gpu_sm_util": gpu_data.get("sm_util", 0),
-            "gpu_temp_c": gpu_data.get("temp_c", 0),
-        }
-        for g in gpu_data.get("gpus", []):
-            idx = g.get("index", 0)
-            flat[f"gpu_{idx}_sm_util"] = g.get("sm_util", 0)
-            flat[f"gpu_{idx}_mem_util"] = g.get("mem_util", 0)
-            flat[f"gpu_{idx}_temp_c"] = g.get("temp_c", 0)
-            flat[f"gpu_{idx}_power_w"] = g.get("power_w", 0)
-            flat[f"gpu_{idx}_gflops_achieved"] = g.get("gflops_achieved", 0)
-        return PlainTextResponse(prometheus_format(flat))
+    snap = await get_snapshot()
+    cpu_data = snap["cpu"]
+    mem_data = snap["memory"]
+    disk_data = snap["disk"]
+    net_data = snap["network"]
+    gpu_data = snap["gpu"]
+    from visage.export.exporter import prometheus_format
+    flat = {
+        "cpu_percent": cpu_data.get("percent", 0),
+        "cpu_count": cpu_data.get("count", 0),
+        "memory_percent": mem_data.get("percent", 0),
+        "memory_used": mem_data.get("used", 0),
+        "memory_total": mem_data.get("total", 0),
+        "disk_read_bytes": disk_data.get("total", {}).get("read_bytes", 0),
+        "disk_write_bytes": disk_data.get("total", {}).get("write_bytes", 0),
+        "network_bytes_recv": net_data.get("total", {}).get("bytes_recv", 0),
+        "network_bytes_sent": net_data.get("total", {}).get("bytes_sent", 0),
+        "gpu_count": gpu_data.get("gpu_count", 1 if gpu_data.get("available") else 0),
+        "gpu_sm_util": gpu_data.get("sm_util", 0),
+        "gpu_temp_c": gpu_data.get("temp_c", 0),
+    }
+    for g in gpu_data.get("gpus", []):
+        idx = g.get("index", 0)
+        flat[f"gpu_{idx}_sm_util"] = g.get("sm_util", 0)
+        flat[f"gpu_{idx}_mem_util"] = g.get("mem_util", 0)
+        flat[f"gpu_{idx}_temp_c"] = g.get("temp_c", 0)
+        flat[f"gpu_{idx}_power_w"] = g.get("power_w", 0)
+        flat[f"gpu_{idx}_gflops_achieved"] = g.get("gflops_achieved", 0)
+    return PlainTextResponse(prometheus_format(flat))
 
 
 @app.get("/health")
@@ -156,21 +181,14 @@ async def websocket_metrics(websocket: WebSocket):
             # Bound concurrent collections, not connections: holding the
             # semaphore across sleep/send would let a few idle clients
             # starve every HTTP endpoint.
-            async with _semaphore:
-                cpu_data, mem_data, disk_data, net_data = await asyncio.gather(
-                    _run_collect(cpu.collect),
-                    _run_collect(memory.collect),
-                    _run_collect(disk.collect),
-                    _run_collect(network.collect),
-                )
-                proc_data = await _run_collect(process.collect, top_n=20)
+            snap = await get_snapshot()
             data = {
                 "timestamp": time.time(),
-                "cpu": cpu_data,
-                "memory": mem_data,
-                "disk": disk_data,
-                "network": net_data,
-                "processes": proc_data,
+                "cpu": snap["cpu"],
+                "memory": snap["memory"],
+                "disk": snap["disk"],
+                "network": snap["network"],
+                "processes": snap["processes"],
             }
             await websocket.send_text(json.dumps(data, default=str))
             await asyncio.sleep(interval)
