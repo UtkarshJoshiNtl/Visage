@@ -76,6 +76,34 @@ class TestExportCsv:
         finally:
             _cleanup(path)
 
+    def test_append_reuses_existing_header_when_fields_change(self):
+        fd, path = tempfile.mkstemp(suffix=".csv")
+        os.close(fd)
+        with open(path, "w") as f:
+            f.write("cpu_percent,mem_percent\n")
+            f.write("10.0,20.0\n")
+        try:
+            # New run collects different fields; header must stay aligned.
+            export_csv([{"mem_percent": 30.0, "net_recv": 999}], path)
+            with open(path) as f:
+                lines = f.read().splitlines()
+            assert lines[0] == "cpu_percent,mem_percent"
+            assert lines[2] == ",30.0"
+        finally:
+            _cleanup(path)
+
+    def test_empty_existing_file_gets_header(self):
+        fd, path = tempfile.mkstemp(suffix=".csv")
+        os.close(fd)  # zero-byte file exists
+        try:
+            export_csv([{"a": 1}], path)
+            with open(path) as f:
+                lines = f.read().splitlines()
+            assert lines[0] == "a"
+            assert lines[1] == "1"
+        finally:
+            _cleanup(path)
+
     def test_empty_rows_no_crash(self):
         fd, path = tempfile.mkstemp(suffix=".csv")
         os.close(fd)

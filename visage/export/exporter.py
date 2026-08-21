@@ -31,17 +31,28 @@ def export_csv(
     path: str | Path,
     fieldnames: list[str] | None = None,
 ) -> Path:
-    """Write rows as CSV. Appends if file already exists."""
+    """Write rows as CSV. Appends if file already exists.
+
+    When appending, the existing header line is reused so rows stay
+    aligned even if the collected fields change between runs; unknown
+    keys are dropped and missing ones are written empty.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    append = path.exists() and path.stat().st_size > 0
+    if append:
+        with open(path, newline="") as f:
+            existing_header = next(csv.reader(f), None)
+        if existing_header:
+            fieldnames = existing_header
     if not fieldnames and rows:
         all_keys: set[str] = set()
         for row in rows:
             all_keys.update(row.keys())
         fieldnames = sorted(all_keys)
-    mode = "a" if path.exists() else "w"
+    mode = "a" if append else "w"
     with open(path, mode, newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames or [])
+        writer = csv.DictWriter(f, fieldnames=fieldnames or [], extrasaction="ignore", restval="")
         if mode == "w":
             writer.writeheader()
         writer.writerows(rows)
