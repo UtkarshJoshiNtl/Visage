@@ -65,7 +65,23 @@ def load_config(path: str | None = None) -> VisageConfig:
     enabled_widgets = widgets_raw.get("enabled", defaults.enabled_widgets)
     widget_order = widgets_raw.get("order", defaults.widget_order)
 
-    thresholds = {**defaults.thresholds, **raw.get("thresholds", {})}
+    # Deep-merge: overriding one key (e.g. thresholds.cpu.red) must not
+    # silently drop the other defaults (e.g. thresholds.cpu.yellow).
+    user_thresholds = raw.get("thresholds", {})
+    if not isinstance(user_thresholds, dict):
+        user_thresholds = {}
+    thresholds: dict[str, Any] = {}
+    for key, default_val in defaults.thresholds.items():
+        user_val = user_thresholds.get(key)
+        if isinstance(default_val, dict) and isinstance(user_val, dict):
+            thresholds[key] = {**default_val, **user_val}
+        elif user_val is not None:
+            thresholds[key] = user_val
+        else:
+            thresholds[key] = default_val
+    for key, user_val in user_thresholds.items():
+        if key not in thresholds:
+            thresholds[key] = user_val
 
     gpu_raw = raw.get("gpu", {})
     gpu_arch_override = gpu_raw.get("arch_override", None)
