@@ -6,7 +6,7 @@ _visage_completion() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     case "${prev}" in
-        --remote-port|--export-interval|--output|--config)
+        --remote-port|--remote-host|--export-interval|--output|--config|--core|--iterations|--max-cv|--min-ipc|--max-time|--max-ipc-drop|--max-time-increase|--max-miss-increase|--baseline|--save-baseline|--output-md|--output-json)
             COMPREPLY=()
             return 0
             ;;
@@ -14,10 +14,18 @@ _visage_completion() {
             COMPREPLY=( $(compgen -W "json jsonl" -- "${cur}") )
             return 0
             ;;
+        --ci-test)
+            COMPREPLY=( $(compgen -f -- "${cur}") )
+            return 0
+            ;;
+        --test-args)
+            COMPREPLY=()
+            return 0
+            ;;
     esac
 
     if [[ "${cur}" == -* ]]; then
-        COMPREPLY=( $(compgen -W "--benchmark --remote --remote-port --export --export-continuous --export-interval --export-format --output --config --version --help" -- "${cur}") )
+        COMPREPLY=( $(compgen -W "--benchmark --remote --remote-host --remote-port --export --export-continuous --export-interval --export-format --output --config --ci-test --test-args --core --iterations --max-cv --min-ipc --max-time --max-ipc-drop --max-time-increase --max-miss-increase --baseline --save-baseline --output-md --output-json --version --help" -- "${cur}") )
         return 0
     fi
 }

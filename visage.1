@@ -1,5 +1,5 @@
 .\" Visage — System Performance Dashboard
-.TH VISAGE 1 "2026-08-20" "Visage 0.2.0" "User Commands"
+.TH VISAGE 1 "2026-08-21" "Visage 0.2.0" "User Commands"
 .SH NAME
 visage \- system performance dashboard
 .SH SYNOPSIS
@@ -16,6 +16,9 @@ Run CPU, memory, and disk benchmarks.
 .BR \-\-remote
 Start the remote monitoring HTTP server (default port 8090).
 .TP
+.BI \-\-remote\-host " HOST"
+Remote server bind address (default: 127.0.0.1). Binding to a non-loopback address without VISAGE_AUTH_TOKEN set prints a warning at startup.
+.TP
 .BI \-\-remote\-port " PORT"
 Remote server port (default: 8090).
 .TP
@@ -23,7 +26,7 @@ Remote server port (default: 8090).
 Snapshot metrics once to JSON.
 .TP
 .BR \-\-export\-continuous
-Continuous CSV export at regular intervals.
+Continuous CSV export at regular intervals. Appends to an existing file, reusing its header line.
 .TP
 .BI \-\-export\-interval " SECS"
 Interval in seconds for continuous export (default: 5.0).
@@ -32,10 +35,53 @@ Interval in seconds for continuous export (default: 5.0).
 Export format: \fBjson\fR (single file) or \fBjsonl\fR (JSON lines, one per line). Default: json.
 .TP
 .BI \-\-output " PATH"
-Output path for \-\-export (default: visage_snapshot.json).
+Output path for \-\-export (default: ~/visage_snapshot.json).
 .TP
 .BI \-\-config " PATH"
 Path to config JSON file.
+.SS CI Gate Options
+.TP
+.BI \-\-ci\-test " EXECUTABLE"
+Run the isolated CI performance benchmark gate on EXECUTABLE and exit 0 (pass) or 1 (regression).
+.TP
+.BI \-\-test\-args " ARGS..."
+Arguments passed to \-\-ci-test executable.
+.TP
+.BI \-\-core " N"
+Target CPU core index for isolated benchmarking (default: 0).
+.TP
+.BI \-\-iterations " N"
+Number of iterations for benchmarking (default: 10).
+.TP
+.BI \-\-max\-cv " PCT"
+Max allowable noise CV percentage (default: 2.0).
+.TP
+.BI \-\-min\-ipc " IPC"
+Minimum required IPC assertion.
+.TP
+.BI \-\-max\-time " SECS"
+Maximum allowed mean wall time in seconds.
+.TP
+.BI \-\-max\-ipc\-drop " PCT"
+Max allowed IPC drop percentage under baseline.
+.TP
+.BI \-\-max\-time\-increase " PCT"
+Max allowed wall time increase percentage over baseline.
+.TP
+.BI \-\-max\-miss\-increase " PCT"
+Max allowed cache miss increase percentage over baseline.
+.TP
+.BI \-\-baseline " PATH"
+Path to baseline benchmark JSON file.
+.TP
+.BI \-\-save\-baseline " PATH"
+Save the current run as baseline JSON.
+.TP
+.BI \-\-output\-md " PATH"
+Write a GitHub Actions markdown summary report.
+.TP
+.BI \-\-output\-json " PATH"
+Write a JSON benchmark summary report.
 .TP
 .BR \-\-version
 Show version and exit.
@@ -53,6 +99,9 @@ Cycle refresh speed (0.5s, 1s, 2s, 5s).
 .TP
 .B t
 Cycle through color themes.
+.TP
+.B g
+Cycle the active GPU in multi-GPU setups.
 .SS Process Keys
 .TP
 .B up/down
@@ -70,14 +119,20 @@ Toggle aggregate mode (group by process name).
 .B t
 Toggle tree view for processes.
 .TP
+.B v
+Toggle vim keybinding mode.
+.TP
 .B l
 Toggle long command line display.
+.TP
+.B i
+Open the process diagnostics deep-dive modal (FDs, sockets, threads, memory).
 .TP
 .B n
 Renice selected process.
 .TP
 .B /
-Filter processes by name.
+Filter processes by name, command line, user, or AI framework tag.
 .TP
 .B Enter
 Open/close process detail panel.
@@ -123,6 +178,9 @@ Export a single metrics snapshot.
 .TP
 .B visage \-\-export \-\-export\-format jsonl \-\-output metrics.jsonl
 Export as JSON Lines (append-friendly).
+.TP
+.B visage \-\-ci\-test ./build/my_engine \-\-core 3 \-\-iterations 10 \-\-max\-cv 2.0
+Run the CI performance gate on core 3; exits non-zero on regression.
 .SH SEE ALSO
 .BR htop (1),
 .BR btop (1),

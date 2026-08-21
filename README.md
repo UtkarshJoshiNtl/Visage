@@ -217,7 +217,7 @@ Visage reads config from (in order of priority):
 2. `~/.config/visage/config.json`
 3. `~/.visage.json`
 
-Every key is optional; defaults apply for anything omitted.
+Every key is optional; defaults apply for anything omitted. `thresholds` entries merge per-metric with the built-in defaults, so overriding `cpu.red` keeps the default `cpu.yellow`.
 
 ```jsonc
 {
@@ -295,6 +295,12 @@ wscat -c ws://localhost:8090/ws/metrics
 | `VISAGE_AUTH_TOKEN` | _(none)_ | If set, all endpoints require `Authorization: Bearer <token>` |
 | `VISAGE_CORS_ORIGINS` | `http://localhost,...` | Comma-separated allowed origins for CORS |
 
+**Notes:**
+
+- All endpoints serve a cached system snapshot with a 1-second TTL. Concurrent clients share a single collection pass instead of triggering one each, so responses can lag live values by up to a second.
+- The WebSocket stream pushes a fresh snapshot every 2 seconds.
+- Binding to a non-loopback address without `VISAGE_AUTH_TOKEN` prints a warning at startup — process command lines and usernames would be exposed unauthenticated.
+
 Endpoints:
 
 | Route | Description |
@@ -334,6 +340,8 @@ visage --export-continuous --export-interval 5 --output metrics.csv
 
 Writes metrics to CSV at regular intervals. Ctrl+C to stop.
 
+If the output file already exists, rows are appended and the existing header line is reused — a schema change between runs drops unknown columns and pads missing ones instead of misaligning the file.
+
 ### Shell Completions
 
 Shell completions are available in `completions/`:
@@ -371,6 +379,20 @@ Options:
   --export-format FORMAT   Export format: json or jsonl (default: json)
   --output PATH            Output path for --export (default: ~/visage_snapshot.json)
   --config PATH            Path to config JSON
+  --ci-test EXECUTABLE     Run isolated CI performance benchmark gate on EXECUTABLE
+  --test-args [ARGS...]    Arguments passed to --ci-test executable
+  --core N                 Target CPU core index for isolated benchmarking (default: 0)
+  --iterations N           Number of iterations for benchmarking (default: 10)
+  --max-cv PCT             Max allowable noise CV percentage (default: 2.0)
+  --min-ipc IPC            Minimum required IPC assertion
+  --max-time SECS          Maximum allowed mean wall time in seconds
+  --max-ipc-drop PCT       Max allowed IPC drop percentage under baseline
+  --max-time-increase PCT  Max allowed wall time increase percentage over baseline
+  --max-miss-increase PCT  Max allowed cache miss increase percentage over baseline
+  --baseline PATH          Path to baseline benchmark JSON file
+  --save-baseline PATH     Path to save current run as baseline JSON
+  --output-md PATH         Path to write GitHub Actions markdown summary report
+  --output-json PATH       Path to write JSON benchmark summary report
   --version                Show version and exit
   -h, --help               Show help message
 ```
@@ -442,13 +464,13 @@ visage/
 
 ### Design Decisions
 
-- **Collectors are stateless** — they return plain dicts. Stateful rate computation (disk, network deltas) lives in `DeltaTracker` in `util.py`, owned by the app layer.
+- **Collectors are stateless** — they return plain dicts. Stateful rate computation (disk, network deltas) lives in `DeltaTracker` in `util.py`, owned by the app layer. Deltas are divided by wall-clock time between ticks, so displayed rates stay correct when tick timing jitters.
 - **Thread-safe collectors** — `cpu.py`, `memory.py`, `network.py` use `threading.Lock` to protect FD access and state from concurrent reads.
 - **Widgets use Textual reactives** — each widget exposes `reactive` attributes and public read-only properties. Setting them triggers targeted re-renders.
 - **Theme system is TOML-based** — themes define color variables that generate TCSS dynamically. Cached to `~/.cache/visage/style.tcss`. No external deps.
-- **Per-process network is approximated** — uses `/proc/[pid]/net/dev` deltas attributed proportionally by CPU usage (no netlink required).
+- **Per-process network is approximated** — processes are grouped by network namespace (`/proc/[pid]/ns/net`); each namespace's `/proc/[pid]/net/dev` counters are read once and attributed across its member processes by CPU share, so estimates sum to actual interface traffic. The eBPF tracer takes precedence when available (root + BCC).
 - **ASCII fallback is automatic** — SSH sessions and non-UTF terminals get block/ASCII graphs instead of braille.
-- **Remote mode is secure by default** — binds to `127.0.0.1`, restricts CORS to localhost, optional Bearer token auth, WebSocket connection limits.
+- **Remote mode is secure by default** — binds to `127.0.0.1`, restricts CORS to localhost, optional Bearer token auth, warns when binding non-loopback without a token, and bounds concurrent metric collections behind a shared 1-second snapshot cache.
 - **Raw /proc parsers** replace psutil for CPU and memory — single FD opened once, seek(0) each tick, with stale FD recovery.
 - **No third-party deps for PMU counters** — `perf_event_open` called via raw `ctypes`.
 - **Graceful degradation** — all kernel-level features (eBPF, PMU, cpuset, frequency lock) fall back to unprivileged alternatives when root/permissions are unavailable.
