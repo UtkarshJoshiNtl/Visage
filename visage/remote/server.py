@@ -198,6 +198,20 @@ async def websocket_metrics(websocket: WebSocket):
         logger.exception("WebSocket error")
 
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
 def serve(host: str = "127.0.0.1", port: int = 8090) -> None:
     """Start the remote monitoring server."""
+    if host not in _LOOPBACK_HOSTS and not _AUTH_TOKEN:
+        logger.warning(
+            "Binding to %s without VISAGE_AUTH_TOKEN exposes process command "
+            "lines, usernames, and hardware metrics to the network.",
+            host,
+        )
+        print(
+            f"WARNING: binding to {host} without VISAGE_AUTH_TOKEN exposes "
+            "process command lines and usernames unauthenticated. "
+            "Set VISAGE_AUTH_TOKEN or use --remote-host 127.0.0.1."
+        )
     uvicorn.run(app, host=host, port=port)
