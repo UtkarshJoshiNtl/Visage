@@ -15,6 +15,12 @@ Usage::
           f"noisy={summary.noisy}")
 """
 
+from visage.runners.ci import (
+    CiGateConfig,
+    CiGateResult,
+    generate_markdown_report,
+    run_ci_gate,
+)
 from visage.runners.isolated import (
     BenchmarkResult,
     BenchmarkSummary,
@@ -27,8 +33,12 @@ from visage.runners.isolated import (
 __all__ = [
     "BenchmarkResult",
     "BenchmarkSummary",
+    "CiGateConfig",
+    "CiGateResult",
     "CpuCage",
     "CpuFreqUnavailableError",
+    "generate_markdown_report",
     "run_benchmark",
+    "run_ci_gate",
     "run_isolated",
 ]
