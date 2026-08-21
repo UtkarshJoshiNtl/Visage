@@ -152,8 +152,11 @@ async def websocket_metrics(websocket: WebSocket):
 
     interval = 2.0
     try:
-        async with _semaphore:
-            while True:
+        while True:
+            # Bound concurrent collections, not connections: holding the
+            # semaphore across sleep/send would let a few idle clients
+            # starve every HTTP endpoint.
+            async with _semaphore:
                 cpu_data, mem_data, disk_data, net_data = await asyncio.gather(
                     _run_collect(cpu.collect),
                     _run_collect(memory.collect),
@@ -161,16 +164,16 @@ async def websocket_metrics(websocket: WebSocket):
                     _run_collect(network.collect),
                 )
                 proc_data = await _run_collect(process.collect, top_n=20)
-                data = {
-                    "timestamp": time.time(),
-                    "cpu": cpu_data,
-                    "memory": mem_data,
-                    "disk": disk_data,
-                    "network": net_data,
-                    "processes": proc_data,
-                }
-                await websocket.send_text(json.dumps(data, default=str))
-                await asyncio.sleep(interval)
+            data = {
+                "timestamp": time.time(),
+                "cpu": cpu_data,
+                "memory": mem_data,
+                "disk": disk_data,
+                "network": net_data,
+                "processes": proc_data,
+            }
+            await websocket.send_text(json.dumps(data, default=str))
+            await asyncio.sleep(interval)
     except WebSocketDisconnect:
         pass
     except Exception:
