@@ -8,6 +8,31 @@ from typing import Any
 import psutil
 
 
+import re
+
+_AI_PATTERNS: list[tuple[str, str]] = [
+    (r"(?i)\bvllm\b|vllm\.entrypoints", "vLLM"),
+    (r"(?i)\bollama\b", "Ollama"),
+    (r"(?i)\btorchrun\b|\btorch\b|pytorch", "PyTorch"),
+    (r"(?i)trtexec|trtllm|tensorrt", "TensorRT"),
+    (r"(?i)tritonserver|\btriton\b", "Triton"),
+    (r"(?i)llama-server|llama-cli|llama-bench|llama_cpp", "Llama.cpp"),
+    (r"(?i)text-generation-(?:server|launcher)|transformers", "Transformers"),
+    (r"(?i)deepspeed", "DeepSpeed"),
+    (r"(?i)\bjax\b", "JAX"),
+    (r"(?i)tensorflow|tf_serving", "TensorFlow"),
+]
+
+
+def detect_ai_framework(name: str, cmdline: str) -> str | None:
+    """Detect if a process belongs to a known AI/LLM framework."""
+    target = f"{name} {cmdline}"
+    for pattern, framework in _AI_PATTERNS:
+        if re.search(pattern, target):
+            return framework
+    return None
+
+
 _SORT_KEYS = {
     "cpu": lambda p: p.get("cpu", 0.0),
     "memory": lambda p: p.get("memory", 0.0),
@@ -36,6 +61,8 @@ def _collect_one(proc: psutil.Process, with_io: bool = False) -> dict[str, Any] 
     cmdline = info.get("cmdline")
     cmdline_str = " ".join(cmdline) if cmdline else name
 
+    ai_fw = detect_ai_framework(name, cmdline_str)
+
     data = {
         "pid": info.get("pid", 0),
         "ppid": info.get("ppid", 0),
@@ -49,6 +76,8 @@ def _collect_one(proc: psutil.Process, with_io: bool = False) -> dict[str, Any] 
         "threads": info.get("num_threads", 0),
         "start_time": info.get("create_time", 0.0),
         "cmdline": cmdline_str,
+        "ai_framework": ai_fw,
+        "is_ai": ai_fw is not None,
         "io_read": 0,
         "io_write": 0,
     }
@@ -85,9 +114,12 @@ def collect(
             continue
         if filter_str:
             flt = filter_str.lower()
+            ai_tag = (data.get("ai_framework") or "").lower()
             if (flt not in data["name"].lower()
                     and flt not in data["cmdline"].lower()
-                    and flt not in data["username"].lower()):
+                    and flt not in data["username"].lower()
+                    and flt not in ai_tag
+                    and not (flt == "ai" and data.get("is_ai"))):
                 continue
         processes.append(data)
 
@@ -126,6 +158,8 @@ def _aggregate_by_name(
                 "threads": 0,
                 "start_time": p.get("start_time", 0.0),
                 "cmdline": p.get("cmdline", ""),
+                "ai_framework": p.get("ai_framework"),
+                "is_ai": p.get("is_ai", False),
                 "count": 0,
                 "pids": [],
             }
@@ -134,6 +168,9 @@ def _aggregate_by_name(
         g["memory"] += p.get("memory", 0.0)
         g["mem_rss"] += p.get("mem_rss", 0)
         g["threads"] += p.get("threads", 0)
+        if not g.get("ai_framework") and p.get("ai_framework"):
+            g["ai_framework"] = p.get("ai_framework")
+            g["is_ai"] = True
         g["count"] += 1
         g["pids"].append(p.get("pid", 0))
 

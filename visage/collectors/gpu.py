@@ -47,12 +47,7 @@ GPU_SPECS: list[tuple[str, dict[str, Any]]] = [
 DEFAULT_SPEC: dict[str, Any] = {"flops_fp32": 128, "flops_fp16": 256, "bus_width": 256}
 
 _vendor: str | None = None
-_handle: Any = None
-_gpu_name: str = ""
-_gpu_spec: dict[str, Any] = {}
-_sm_count: int = 0
-_core_clock_max_mhz: float = 0.0
-_mem_clock_max_mhz: float = 0.0
+_devices: list[dict[str, Any]] = []
 
 
 def _find_spec(name: str) -> dict[str, Any]:
@@ -63,44 +58,58 @@ def _find_spec(name: str) -> dict[str, Any]:
 
 
 def _ensure_gpu() -> bool:
-    global _vendor, _handle, _gpu_name, _gpu_spec, _sm_count
-    global _core_clock_max_mhz, _mem_clock_max_mhz
+    global _vendor, _devices
 
-    if _vendor is not None:
+    if _vendor is not None and _devices:
         return True
+
+    _devices = []
 
     # ---- NVIDIA ----
     try:
         import pynvml
 
         pynvml.nvmlInit()
-        h = pynvml.nvmlDeviceGetHandleByIndex(0)
-        name = pynvml.nvmlDeviceGetName(h)
+        count = pynvml.nvmlDeviceGetCount()
+        if count > 0:
+            for i in range(count):
+                try:
+                    h = pynvml.nvmlDeviceGetHandleByIndex(i)
+                    name = pynvml.nvmlDeviceGetName(h)
+                    if isinstance(name, bytes):
+                        name = name.decode("utf-8", errors="replace")
 
-        sm_count = 0
-        try:
-            attrs = pynvml.nvmlDeviceGetAttributes(h)
-            sm_count = attrs.multiProcessorCount
-        except Exception:
-            pass
+                    sm_count = 0
+                    try:
+                        attrs = pynvml.nvmlDeviceGetAttributes(h)
+                        sm_count = attrs.multiProcessorCount
+                    except Exception:
+                        pass
 
-        try:
-            cmax = pynvml.nvmlDeviceGetMaxClockInfo(h, pynvml.NVML_CLOCK_GRAPHICS)
-        except Exception:
-            cmax = 0
-        try:
-            mmax = pynvml.nvmlDeviceGetMaxClockInfo(h, pynvml.NVML_CLOCK_MEM)
-        except Exception:
-            mmax = 0
+                    try:
+                        cmax = pynvml.nvmlDeviceGetMaxClockInfo(h, pynvml.NVML_CLOCK_GRAPHICS)
+                    except Exception:
+                        cmax = 0
+                    try:
+                        mmax = pynvml.nvmlDeviceGetMaxClockInfo(h, pynvml.NVML_CLOCK_MEM)
+                    except Exception:
+                        mmax = 0
 
-        _vendor = "nvidia"
-        _handle = h
-        _gpu_name = name
-        _sm_count = sm_count
-        _gpu_spec = _find_spec(name)
-        _core_clock_max_mhz = cmax
-        _mem_clock_max_mhz = mmax
-        return True
+                    _devices.append({
+                        "index": i,
+                        "handle": h,
+                        "name": str(name),
+                        "sm_count": sm_count,
+                        "spec": _find_spec(str(name)),
+                        "core_clock_max_mhz": cmax,
+                        "mem_clock_max_mhz": mmax,
+                    })
+                except Exception:
+                    continue
+
+            if _devices:
+                _vendor = "nvidia"
+                return True
     except Exception:
         pass
 
@@ -110,32 +119,50 @@ def _ensure_gpu() -> bool:
 
         amdsmi.amdsmi_init()
         handles = amdsmi.amdsmi_get_processor_handles()
-        if not handles:
-            amdsmi.amdsmi_shutdown()
-            return False
-        h = handles[0]
-        name = amdsmi.amdsmi_get_gpu_device_name(h)
+        if handles:
+            for i, h in enumerate(handles):
+                try:
+                    name = amdsmi.amdsmi_get_gpu_device_name(h)
+                    if isinstance(name, bytes):
+                        name = name.decode("utf-8", errors="replace")
+                    _devices.append({
+                        "index": i,
+                        "handle": h,
+                        "name": str(name),
+                        "sm_count": 0,
+                        "spec": _find_spec(str(name)),
+                        "core_clock_max_mhz": 0.0,
+                        "mem_clock_max_mhz": 0.0,
+                    })
+                except Exception:
+                    continue
 
-        _vendor = "amd"
-        _handle = h
-        _gpu_name = name
-        _sm_count = 0
-        _gpu_spec = _find_spec(name)
-        _core_clock_max_mhz = 0.0
-        _mem_clock_max_mhz = 0.0
-        return True
+            if _devices:
+                _vendor = "amd"
+                return True
+            else:
+                amdsmi.amdsmi_shutdown()
+                return False
     except Exception:
         pass
 
     return False
 
 
-def _collect_nvidia(h: Any) -> dict[str, Any]:
+def _collect_nvidia(dev_info: dict[str, Any]) -> dict[str, Any]:
     import pynvml
 
-    util = pynvml.nvmlDeviceGetUtilizationRates(h)
-    sm_util = float(util.gpu)
-    mem_util = float(util.memory)
+    h = dev_info["handle"]
+    name = dev_info["name"]
+    sm_count = dev_info["sm_count"]
+
+    try:
+        util = pynvml.nvmlDeviceGetUtilizationRates(h)
+        sm_util = float(util.gpu)
+        mem_util = float(util.memory)
+    except Exception:
+        sm_util = 0.0
+        mem_util = 0.0
 
     try:
         power_w = pynvml.nvmlDeviceGetPowerUsage(h) / 1000.0
@@ -160,12 +187,27 @@ def _collect_nvidia(h: Any) -> dict[str, Any]:
     except Exception:
         temp = 0
 
-    mem_info = pynvml.nvmlDeviceGetMemoryInfo(h)
-    mem_used = mem_info.used
-    mem_total = mem_info.total
+    try:
+        mem_info = pynvml.nvmlDeviceGetMemoryInfo(h)
+        mem_used = mem_info.used
+        mem_total = mem_info.total
+    except Exception:
+        mem_used = 0
+        mem_total = 0
+
+    pcie_tx_bytes = 0.0
+    pcie_rx_bytes = 0.0
+    try:
+        pcie_tx_kb = pynvml.nvmlDeviceGetPcieThroughput(h, pynvml.NVML_PCIE_UTIL_TX_BYTES)
+        pcie_rx_kb = pynvml.nvmlDeviceGetPcieThroughput(h, pynvml.NVML_PCIE_UTIL_RX_BYTES)
+        pcie_tx_bytes = float(pcie_tx_kb * 1024)
+        pcie_rx_bytes = float(pcie_rx_kb * 1024)
+    except Exception:
+        pass
 
     return {
-        "name": _gpu_name,
+        "index": dev_info.get("index", 0),
+        "name": name,
         "sm_util": sm_util,
         "mem_util": mem_util,
         "power_w": power_w,
@@ -175,12 +217,18 @@ def _collect_nvidia(h: Any) -> dict[str, Any]:
         "temp_c": temp,
         "mem_used_bytes": mem_used,
         "mem_total_bytes": mem_total,
-        "sm_count": _sm_count,
+        "sm_count": sm_count,
+        "pcie_tx_bytes_sec": pcie_tx_bytes,
+        "pcie_rx_bytes_sec": pcie_rx_bytes,
     }
 
 
-def _collect_amd(h: Any) -> dict[str, Any]:
+def _collect_amd(dev_info: dict[str, Any]) -> dict[str, Any]:
     import amdsmi
+
+    h = dev_info["handle"]
+    name = dev_info["name"]
+    sm_count = dev_info["sm_count"]
 
     try:
         activity = amdsmi.amdsmi_get_gpu_activity(h)
@@ -225,7 +273,8 @@ def _collect_amd(h: Any) -> dict[str, Any]:
         mem_total = 0
 
     return {
-        "name": _gpu_name,
+        "index": dev_info.get("index", 0),
+        "name": name,
         "sm_util": sm_util,
         "mem_util": mem_util,
         "power_w": power_w,
@@ -235,18 +284,20 @@ def _collect_amd(h: Any) -> dict[str, Any]:
         "temp_c": temp,
         "mem_used_bytes": mem_used,
         "mem_total_bytes": mem_total,
-        "sm_count": _sm_count,
+        "sm_count": sm_count,
+        "pcie_tx_bytes_sec": 0.0,
+        "pcie_rx_bytes_sec": 0.0,
     }
 
 
 def _compute_roofline(data: dict[str, Any], spec: dict[str, Any] | None = None) -> dict[str, Any]:
     if spec is None:
-        spec = _gpu_spec
-    clock_core = data["clock_core_mhz"]
-    clock_mem = data["clock_mem_mhz"]
-    sm_util = data["sm_util"]
-    mem_util = data["mem_util"]
-    sm_count = data["sm_count"]
+        spec = _find_spec(data.get("name", ""))
+    clock_core = data.get("clock_core_mhz", 0)
+    clock_mem = data.get("clock_mem_mhz", 0)
+    sm_util = data.get("sm_util", 0.0)
+    mem_util = data.get("mem_util", 0.0)
+    sm_count = data.get("sm_count", 0)
     bus_width = spec.get("bus_width", 256)
 
     if sm_count == 0 or clock_core == 0 or clock_mem == 0:
@@ -303,6 +354,8 @@ EMPTY_RESULT: dict[str, Any] = {
     "available": False,
     "vendor": None,
     "name": "",
+    "gpu_count": 0,
+    "gpus": [],
     "sm_util": 0.0,
     "mem_util": 0.0,
     "power_w": 0.0,
@@ -313,6 +366,8 @@ EMPTY_RESULT: dict[str, Any] = {
     "mem_used_bytes": 0,
     "mem_total_bytes": 0,
     "sm_count": 0,
+    "pcie_tx_bytes_sec": 0.0,
+    "pcie_rx_bytes_sec": 0.0,
     "gflops_peak_fp32": 0.0,
     "gflops_peak_fp16": 0.0,
     "gflops_achieved": 0.0,
@@ -326,37 +381,54 @@ EMPTY_RESULT: dict[str, Any] = {
 
 
 def collect() -> dict[str, Any]:
-    """Collect GPU metrics and compute roofline data.
+    """Collect GPU metrics and compute roofline data for all detected GPUs.
 
     Returns
     -------
-    dict with keys documented in EMPTY_RESULT above.
+    dict with keys documented in EMPTY_RESULT above, plus a ``gpus`` list
+    containing per-device data. Top-level values represent the primary GPU
+    (or aggregate) for backward compatibility.
     ``available`` is ``False`` when no GPU or library is accessible.
     """
-    if not _ensure_gpu():
+    if not _ensure_gpu() or not _devices:
         return dict(EMPTY_RESULT)
 
-    try:
-        if _vendor == "nvidia":
-            raw = _collect_nvidia(_handle)
-        else:
-            raw = _collect_amd(_handle)
-    except Exception:
+    gpus_data: list[dict[str, Any]] = []
+
+    for dev in _devices:
+        try:
+            if _vendor == "nvidia":
+                raw = _collect_nvidia(dev)
+            else:
+                raw = _collect_amd(dev)
+            spec = dev.get("spec") or _find_spec(dev.get("name", ""))
+            roofline = _compute_roofline(raw, spec)
+            card_data = {
+                "vendor": _vendor,
+                **raw,
+                **roofline,
+                "roofline_method": "SM_util × theoretical_peak (estimate)",
+            }
+            gpus_data.append(card_data)
+        except Exception:
+            continue
+
+    if not gpus_data:
         return dict(EMPTY_RESULT)
 
-    roofline = _compute_roofline(raw)
+    primary = gpus_data[0]
 
     return {
         "available": True,
         "vendor": _vendor,
-        **raw,
-        **roofline,
-        "roofline_method": "SM_util × theoretical_peak (estimate)",
+        "gpu_count": len(gpus_data),
+        "gpus": gpus_data,
+        **primary,
     }
 
 
 def close() -> None:
-    global _vendor, _handle
+    global _vendor, _devices
     if _vendor == "nvidia":
         try:
             import pynvml
@@ -370,4 +442,4 @@ def close() -> None:
         except Exception:
             pass
     _vendor = None
-    _handle = None
+    _devices = []

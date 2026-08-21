@@ -366,6 +366,9 @@ class ProcessesWidget(Widget):
             if len(cmdline) > 80:
                 cmdline = cmdline[:79] + "\u2026"
             lines.append(f"[bold]Cmd:[/] {cmdline}")
+        ai_fw = p.get("ai_framework")
+        if ai_fw:
+            lines.append(f"[bold magenta]AI Framework:[/] [bold]{ai_fw}[/]")
         self._detail.update("\n".join(lines))
 
     def _show_signal_picker(self, pid: int) -> None:
@@ -440,6 +443,9 @@ class ProcessesWidget(Widget):
                     cmdline = cmdline[:47] + "\u2026"
                 name = cmdline
 
+            ai_fw = p.get("ai_framework")
+            ai_tag = f" [magenta][{ai_fw}][/]" if ai_fw else ""
+
             elapsed = _fmt_time(p.get("start_time", 0))
             rss = _fmt_rss(p.get("mem_rss", 0))
             nice = p.get("nice", 0)
@@ -450,13 +456,13 @@ class ProcessesWidget(Widget):
 
             if i == self._selected_idx:
                 table.add_row(
-                    marker, f"[reverse]{name}[/]", pid_str,
+                    marker, f"[reverse]{name}{ai_tag}[/]", pid_str,
                     f"{p.get('cpu', 0):.1f}", f"{p.get('memory', 0):.1f}",
                     rss, str(p.get("threads", "")), str(nice), elapsed,
                 )
             else:
                 table.add_row(
-                    marker, name, pid_str,
+                    marker, f"{name}{ai_tag}", pid_str,
                     f"{p.get('cpu', 0):.1f}", f"{p.get('memory', 0):.1f}",
                     rss, str(p.get("threads", "")), str(nice), elapsed,
                 )

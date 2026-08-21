@@ -44,6 +44,7 @@ class VisageApp(App):
         ("r", "refresh_now", "Refresh"),
         ("d", "cycle_delay", "Speed"),
         ("t", "cycle_theme", "Theme"),
+        ("g", "cycle_gpu", "GPU"),
     ]
 
     def __init__(self, config_path: str | None = None) -> None:
@@ -288,3 +289,14 @@ class VisageApp(App):
         display = theme.display_name if theme else name
         self._apply_theme(name)
         self.notify(f"Theme: {display}", timeout=2)
+
+    def action_cycle_gpu(self) -> None:
+        gpu_widget = self._widget("gpu")
+        if gpu_widget is not None and getattr(gpu_widget, "available", False):
+            gpu_widget.cycle_gpu()
+            self.notify(
+                f"Active GPU: {gpu_widget.active_gpu_idx + 1}/{gpu_widget.gpu_count} ({gpu_widget.name})",
+                timeout=2,
+            )
+        else:
+            self.notify("No active GPU to switch", timeout=2)
