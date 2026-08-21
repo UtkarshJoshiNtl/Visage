@@ -151,7 +151,7 @@ def collect() -> dict:
                 "interrupts_per_sec": 0.0,
                 "soft_interrupts": 0,
                 "soft_per_sec": 0.0,
-                "syscalls": 0,
+                "forks": 0,
                 "model": model,
                 "uptime": uptime,
             }
@@ -234,7 +234,7 @@ def collect() -> dict:
             "interrupts_per_sec": intr_per_sec,
             "soft_interrupts": softirq,
             "soft_per_sec": soft_per_sec,
-            "syscalls": procs,
+            "forks": procs,
             "model": model,
             "uptime": uptime,
         }

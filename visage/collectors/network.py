@@ -1,5 +1,6 @@
 """Network I/O metric collector — per-interface breakdown and per-process approximation."""
 
+import logging
 import os
 import sys
 import threading
@@ -7,6 +8,8 @@ from typing import Any
 
 import psutil
 
+
+logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _prev_per_nic: dict[str, dict[str, float]] = {}
@@ -29,7 +32,7 @@ def collect() -> dict[str, Any]:
                     "packets_recv": float(counters.packets_recv),
                 }
         except Exception:
-            pass
+            logger.debug("net_io_counters failed", exc_info=True)
 
         pernic: dict[str, dict[str, Any]] = {}
         try:
@@ -53,7 +56,7 @@ def collect() -> dict[str, Any]:
                         "ip": ip,
                     }
         except Exception:
-            pass
+            logger.debug("net_io_counters(pernic) failed", exc_info=True)
 
         return {
             "total": total,
@@ -236,7 +239,7 @@ def collect_per_process(top_n: int = 10) -> list[dict[str, Any]]:
                     results.sort(key=lambda x: x["rx_bytes"] + x["tx_bytes"], reverse=True)
                     return results[:top_n]
     except Exception:
-        pass
+        logger.debug("eBPF per-process attribution failed", exc_info=True)
 
     # 2. Inode-aware socket & namespace fallback.
     # /proc/<pid>/net/dev reports counters per network namespace, not per
@@ -302,6 +305,6 @@ def collect_per_process(top_n: int = 10) -> list[dict[str, Any]]:
 
         results.sort(key=lambda x: x["rx_bytes_est"] + x["tx_bytes_est"] + (x["socket_count"] * 1024), reverse=True)
     except Exception:
-        pass
+        logger.debug("socket-inode per-process attribution failed", exc_info=True)
 
     return results[:top_n]

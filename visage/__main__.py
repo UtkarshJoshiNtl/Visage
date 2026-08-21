@@ -15,6 +15,8 @@ import sys
 import time
 from pathlib import Path
 
+from visage import __version__ as _VISAGE_VERSION
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -166,7 +168,7 @@ def main() -> None:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"visage {__import__('visage').__version__}",
+        version=f"visage {_VISAGE_VERSION}",
     )
     args = parser.parse_args()
 
