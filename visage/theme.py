@@ -179,4 +179,41 @@ Footer {{
     margin: 0 0 0 0;
     padding: 0 0 0 0;
 }}
+
+.inspect-modal-container {{
+    width: 85%;
+    height: 85%;
+    background: {card};
+    border: solid {accent};
+    padding: 1 2;
+    align: center middle;
+}}
+
+#modal-title {{
+    color: {accent};
+    text-style: bold;
+    margin-bottom: 1;
+}}
+
+#modal-tabs-bar {{
+    height: 3;
+    margin-bottom: 1;
+}}
+
+#modal-tabs-bar Button {{
+    margin-right: 1;
+    min-width: 12;
+}}
+
+#modal-body-scroll {{
+    height: 1fr;
+    background: {bg};
+    border: solid {border};
+    padding: 1;
+}}
+
+#modal-footer {{
+    color: {dim};
+    margin-top: 1;
+}}
 """

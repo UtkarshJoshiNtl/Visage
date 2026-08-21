@@ -5,12 +5,182 @@ from typing import Any
 
 from rich.table import Table
 from textual import work
-from textual.containers import Vertical
+from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
-from textual.widgets import Input, Label, Static
+from textual.screen import ModalScreen
+from textual.widgets import Button, Input, Label, Static
 from textual.widget import Widget
 
+from visage.collectors.diagnostics import collect_process_diagnostics
 from visage.collectors.process import collect, get_signal_choices, send_signal
+
+
+class ProcessInspectModal(ModalScreen):
+    """Deep-dive interactive diagnostic modal for a process."""
+
+    BINDINGS = [
+        ("escape", "dismiss", "Close"),
+        ("q", "dismiss", "Close"),
+        ("1", "tab_overview", "Overview"),
+        ("2", "tab_fds", "FDs"),
+        ("3", "tab_sockets", "Sockets"),
+        ("4", "tab_threads", "Threads"),
+        ("5", "tab_env", "Env"),
+    ]
+
+    current_tab: int = reactive(1)
+
+    def __init__(self, pid: int, proc_name: str = ""):
+        super().__init__()
+        self.pid = pid
+        self.proc_name = proc_name
+        self.diag = collect_process_diagnostics(pid)
+
+    def compose(self):
+        with Container(classes="inspect-modal-container"):
+            with Vertical():
+                yield Label(f"Process Diagnostics: PID {self.pid} — {self.proc_name or self.diag.get('name', '')}", id="modal-title")
+                with Horizontal(id="modal-tabs-bar"):
+                    yield Button("[1] Overview", id="btn-tab-1", variant="primary")
+                    yield Button("[2] FDs", id="btn-tab-2")
+                    yield Button("[3] Sockets", id="btn-tab-3")
+                    yield Button("[4] Threads", id="btn-tab-4")
+                    yield Button("[5] Env", id="btn-tab-5")
+                with VerticalScroll(id="modal-body-scroll"):
+                    yield Static(id="modal-content")
+                yield Label("[dim]Keys: [1-5] switch view  |  [Esc/q] close[/]", id="modal-footer")
+
+    def on_mount(self) -> None:
+        self._content = self.query_one("#modal-content", Static)
+        self._render_tab()
+
+    def action_dismiss(self) -> None:
+        self.app.pop_screen()
+
+    def action_tab_overview(self) -> None:
+        self.current_tab = 1
+        self._render_tab()
+
+    def action_tab_fds(self) -> None:
+        self.current_tab = 2
+        self._render_tab()
+
+    def action_tab_sockets(self) -> None:
+        self.current_tab = 3
+        self._render_tab()
+
+    def action_tab_threads(self) -> None:
+        self.current_tab = 4
+        self._render_tab()
+
+    def action_tab_env(self) -> None:
+        self.current_tab = 5
+        self._render_tab()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id
+        if btn_id == "btn-tab-1":
+            self.action_tab_overview()
+        elif btn_id == "btn-tab-2":
+            self.action_tab_fds()
+        elif btn_id == "btn-tab-3":
+            self.action_tab_sockets()
+        elif btn_id == "btn-tab-4":
+            self.action_tab_threads()
+        elif btn_id == "btn-tab-5":
+            self.action_tab_env()
+
+    def _render_tab(self) -> None:
+        if not hasattr(self, "_content"):
+            return
+        d = self.diag
+        lines = []
+
+        if self.current_tab == 1:
+            # Overview & Memory
+            lines.append(f"[bold cyan]Process Overview & Silicon/Memory State[/]")
+            lines.append(f"  [bold]PID:[/] {d.get('pid')}  [bold]PPID:[/] {d.get('ppid')}  [bold]Name:[/] {d.get('name')}")
+            cmd = " ".join(d.get("cmdline", [])) or "(none)"
+            lines.append(f"  [bold]Command:[/] {cmd}")
+            lines.append("")
+            lines.append("[bold yellow]Memory Footprint (/proc/[pid]/status):[/]")
+            mem = d.get("memory", {})
+            if mem:
+                for k, v in mem.items():
+                    lines.append(f"  \u2022 [bold]{k}:[/] {v}")
+            else:
+                lines.append("  (no memory info accessible)")
+            lines.append("")
+            lines.append("[bold green]I/O Statistics (/proc/[pid]/io):[/]")
+            io_data = d.get("io", {})
+            if io_data:
+                for k, v in io_data.items():
+                    lines.append(f"  \u2022 [bold]{k}:[/] {v}")
+            else:
+                lines.append("  (no IO stats accessible)")
+
+        elif self.current_tab == 2:
+            # File Descriptors
+            fds = d.get("file_descriptors", [])
+            lines.append(f"[bold cyan]Open File Descriptors ({len(fds)} total):[/]\n")
+            if fds:
+                table = Table(box=None, show_header=True, padding=(0, 1))
+                table.add_column("FD", justify="right", style="cyan")
+                table.add_column("Type", style="yellow")
+                table.add_column("Resolved Target Path / Endpoint", style="white")
+                for item in fds[:100]:
+                    table.add_row(item["fd"], item["type"], item["target"])
+                self._content.update(table)
+                return
+            else:
+                lines.append("  (no file descriptors accessible or permission denied)")
+
+        elif self.current_tab == 3:
+            # Network Sockets
+            sockets = d.get("sockets", [])
+            lines.append(f"[bold cyan]Active Network Sockets ({len(sockets)} open):[/]\n")
+            if sockets:
+                table = Table(box=None, show_header=True, padding=(0, 1))
+                table.add_column("Proto", style="cyan")
+                table.add_column("Local Address", style="green")
+                table.add_column("Remote Address", style="yellow")
+                table.add_column("State", style="magenta")
+                table.add_column("TX/RX Queue", style="dim")
+                for s in sockets:
+                    q = f"{s.get('tx_queue', 0)} / {s.get('rx_queue', 0)}"
+                    table.add_row(s.get("proto", "tcp"), s.get("local_addr", ""), s.get("remote_addr", ""), s.get("state", ""), q)
+                self._content.update(table)
+                return
+            else:
+                lines.append("  (no open network sockets detected for this process)")
+
+        elif self.current_tab == 4:
+            # Threads
+            threads = d.get("threads", [])
+            lines.append(f"[bold cyan]Thread Breakdown ({len(threads)} active threads):[/]\n")
+            if threads:
+                table = Table(box=None, show_header=True, padding=(0, 1))
+                table.add_column("TID", justify="right", style="cyan")
+                table.add_column("Thread Name", style="white")
+                table.add_column("State", style="green")
+                for t in threads:
+                    table.add_row(str(t["tid"]), t["name"], t["state"])
+                self._content.update(table)
+                return
+            else:
+                lines.append("  (no thread list accessible)")
+
+        elif self.current_tab == 5:
+            # Environment
+            env = d.get("environ", {})
+            lines.append(f"[bold cyan]Environment Variables ({len(env)} total):[/]\n")
+            if env:
+                for k, v in sorted(env.items()):
+                    lines.append(f"  [bold green]{k}[/] = [white]{v}[/]")
+            else:
+                lines.append("  (environment inaccessible or empty)")
+
+        self._content.update("\n".join(lines))
 
 
 def _fmt_time(ts: float) -> str:
@@ -121,7 +291,7 @@ class ProcessesWidget(Widget):
             parts.append("[bold]VIM[/]")
         if self._filter_str:
             parts.append(f"[bold]Filter:[/] {self._filter_str}")
-        parts.append("[dim]/search  x:signal  t:tree  a:agg  v:vim  l:long  n:nice  enter:detail[/]")
+        parts.append("[dim]/search  x:signal  i:inspect  t:tree  a:agg  v:vim  l:long  n:nice  enter:detail[/]")
         self._banner.update("  ".join(parts))
 
     def on_key(self, event) -> None:
@@ -224,6 +394,16 @@ class ProcessesWidget(Widget):
             self._refresh_table()
             self._refresh_banner()
             event.stop()
+        elif event.key == "i":
+            if self._selected_idx < len(procs):
+                p = procs[self._selected_idx]
+                pid = p.get("pid", 0)
+                if pid > 0:
+                    try:
+                        self.app.push_screen(ProcessInspectModal(pid, p.get("name", "")))
+                    except Exception as e:
+                        self.notify(f"Inspect failed: {e}", severity="error")
+                    event.stop()
         elif event.key == "n":
             if self._selected_idx < len(procs):
                 pid = procs[self._selected_idx].get("pid", 0)
