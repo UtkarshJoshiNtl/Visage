@@ -174,8 +174,8 @@ class ProcessTracer:
         return True
 
 
-def create_tracer() -> EbpfTracer | ProcessTracer:
-    """Create the best available tracer.
+def create_tracer() -> EbpfTracer | ProcessTracer | None:
+    """Create the best available process tracer.
 
     Tries eBPF first; falls back to /proc polling.
     Returns a started tracer instance or None if neither is available.
@@ -193,3 +193,122 @@ def create_tracer() -> EbpfTracer | ProcessTracer:
         return t
     except Exception:
         return None
+
+
+NET_BPF_PROGRAM = r"""
+#include <uapi/linux/ptrace.h>
+
+struct net_flow {
+    u64 rx_bytes;
+    u64 tx_bytes;
+};
+
+BPF_HASH(pid_net_flow, u32, struct net_flow, 10240);
+
+int trace_tcp_send(struct pt_regs *ctx, void *sk, void *msg, size_t size) {
+    u32 pid = bpf_get_current_pid_tgid() >> 32;
+    struct net_flow *flow = pid_net_flow.lookup(&pid);
+    if (flow) {
+        flow->tx_bytes += size;
+    } else {
+        struct net_flow init = { .rx_bytes = 0, .tx_bytes = size };
+        pid_net_flow.update(&pid, &init);
+    }
+    return 0;
+}
+
+int trace_tcp_recv(struct pt_regs *ctx, void *sk, int copied) {
+    if (copied <= 0) return 0;
+    u32 pid = bpf_get_current_pid_tgid() >> 32;
+    struct net_flow *flow = pid_net_flow.lookup(&pid);
+    if (flow) {
+        flow->rx_bytes += copied;
+    } else {
+        struct net_flow init = { .rx_bytes = (u64)copied, .tx_bytes = 0 };
+        pid_net_flow.update(&pid, &init);
+    }
+    return 0;
+}
+
+int trace_udp_send(struct pt_regs *ctx, void *sk, void *msg, size_t len) {
+    u32 pid = bpf_get_current_pid_tgid() >> 32;
+    struct net_flow *flow = pid_net_flow.lookup(&pid);
+    if (flow) {
+        flow->tx_bytes += len;
+    } else {
+        struct net_flow init = { .rx_bytes = 0, .tx_bytes = len };
+        pid_net_flow.update(&pid, &init);
+    }
+    return 0;
+}
+"""
+
+
+class EbpfNetTracer:
+    """eBPF-driven per-PID network bandwidth attribution tracer.
+
+    Hooks TCP and UDP transmit and receive kernel functions via BCC.
+    Maintains in-kernel atomic per-PID byte counters.
+    """
+
+    def __init__(self) -> None:
+        self._bpf = None
+        self._active = False
+
+    def start(self) -> bool:
+        try:
+            from bcc import BPF
+
+            self._bpf = BPF(text=NET_BPF_PROGRAM)
+            self._bpf.attach_kprobe(event="tcp_sendmsg", fn_name="trace_tcp_send")
+            self._bpf.attach_kprobe(event="tcp_cleanup_rbuf", fn_name="trace_tcp_recv")
+            self._bpf.attach_kprobe(event="udp_sendmsg", fn_name="trace_udp_send")
+            self._active = True
+            return True
+        except Exception:
+            self._bpf = None
+            self._active = False
+            return False
+
+    def stop(self) -> None:
+        if self._bpf is not None:
+            try:
+                self._bpf.cleanup()
+            except Exception:
+                pass
+            self._bpf = None
+            self._active = False
+
+    def get_stats(self) -> dict[int, dict[str, int]]:
+        """Retrieve per-PID rx_bytes and tx_bytes from the eBPF hash map."""
+        if not self._active or self._bpf is None:
+            return {}
+        result: dict[int, dict[str, int]] = {}
+        try:
+            flow_table = self._bpf["pid_net_flow"]
+            for key, leaf in flow_table.items():
+                pid = int(key.value)
+                result[pid] = {
+                    "rx_bytes": int(leaf.rx_bytes),
+                    "tx_bytes": int(leaf.tx_bytes),
+                }
+        except Exception:
+            pass
+        return result
+
+    @property
+    def available(self) -> bool:
+        return self._active
+
+
+_global_net_tracer: EbpfNetTracer | None = None
+
+
+def get_ebpf_net_tracer() -> EbpfNetTracer:
+    """Get or initialize the global EbpfNetTracer singleton."""
+    global _global_net_tracer
+    if _global_net_tracer is None:
+        _global_net_tracer = EbpfNetTracer()
+        _global_net_tracer.start()
+    return _global_net_tracer
+
