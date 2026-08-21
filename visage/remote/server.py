@@ -121,9 +121,17 @@ async def prometheus_metrics():
             "disk_write_bytes": disk_data.get("total", {}).get("write_bytes", 0),
             "network_bytes_recv": net_data.get("total", {}).get("bytes_recv", 0),
             "network_bytes_sent": net_data.get("total", {}).get("bytes_sent", 0),
+            "gpu_count": gpu_data.get("gpu_count", 1 if gpu_data.get("available") else 0),
             "gpu_sm_util": gpu_data.get("sm_util", 0),
             "gpu_temp_c": gpu_data.get("temp_c", 0),
         }
+        for g in gpu_data.get("gpus", []):
+            idx = g.get("index", 0)
+            flat[f"gpu_{idx}_sm_util"] = g.get("sm_util", 0)
+            flat[f"gpu_{idx}_mem_util"] = g.get("mem_util", 0)
+            flat[f"gpu_{idx}_temp_c"] = g.get("temp_c", 0)
+            flat[f"gpu_{idx}_power_w"] = g.get("power_w", 0)
+            flat[f"gpu_{idx}_gflops_achieved"] = g.get("gflops_achieved", 0)
         return PlainTextResponse(prometheus_format(flat))
 
 
