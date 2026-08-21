@@ -137,9 +137,8 @@ class VisageApp(App):
         }
 
         self.fetch_system_metrics()
-        self._active_timers.append(
-            self.set_interval(self._interval, self.fetch_system_metrics)
-        )
+        self._sys_timer = self.set_interval(self._interval, self.fetch_system_metrics)
+        self._active_timers.append(self._sys_timer)
 
         shown = set(self._cfg.enabled_widgets)
         for widget_name, (method_name, interval, _group) in self._COLLECTOR_TIMERS.items():
