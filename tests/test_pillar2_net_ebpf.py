@@ -1,5 +1,6 @@
 """Tests for Pillar 2: eBPF Socket-Level Network Attribution & Socket Inode Tracking."""
 
+import pytest
 from unittest.mock import MagicMock, mock_open, patch
 
 from visage.collectors.network import (
@@ -81,6 +82,68 @@ class TestNetworkSocketParsing:
             assert len(sockets) == 1
             assert sockets[0]["local_addr"] == "127.0.0.1:8080"
             assert sockets[0]["state"] == "LISTEN"
+
+
+class TestPerProcessAttribution:
+    """The /proc/<pid>/net/dev fallback must not inflate per-netns traffic."""
+
+    @staticmethod
+    def _proc(pid: int, name: str, cpu: float) -> MagicMock:
+        mock = MagicMock()
+        mock.info = {"pid": pid, "name": name, "cpu_percent": cpu}
+        return mock
+
+    def _run_fallback(self, procs, netns_map):
+        """Run collect_per_process with eBPF unavailable and mocked /proc."""
+        sample_dev = (
+            "Inter-|   Receive                        "
+            "|  Transmit\n"
+            " face |bytes    packets errs drop fifo frame compressed multicast "
+            "|bytes    packets errs drop fifo colls carrier compressed\n"
+            "    lo: 1000 10 0 0 0 0 0 0 1000 10 0 0 0 0 0 0\n"
+            "  eth0: 500000 400 0 0 0 0 0 0 250000 300 0 0 0 0 0 0\n"
+        )
+
+        with patch("sys.platform", "linux"), \
+             patch("visage.tracing.tracer.get_ebpf_net_tracer", return_value=None), \
+             patch("psutil.process_iter", return_value=procs), \
+             patch("visage.collectors.network.parse_socket_tables", return_value={}), \
+             patch("visage.collectors.network.get_process_socket_inodes", return_value=[]), \
+             patch("visage.collectors.network._netns_id", side_effect=lambda pid: netns_map[pid]), \
+             patch("builtins.open", mock_open(read_data=sample_dev)):
+            return collect_per_process(top_n=20)
+
+    def test_same_netns_not_multiplied(self):
+        # Two processes share the root netns; eth0 rx is 500000 total.
+        # The old code summed 500000 twice and attributed 1M by CPU share.
+        procs = [self._proc(1, "a", 50.0), self._proc(2, "b", 50.0)]
+        results = self._run_fallback(procs, {1: "4026531956", 2: "4026531956"})
+        assert len(results) == 2
+        assert sum(r["rx_bytes_est"] for r in results) == pytest.approx(500000)
+        assert sum(r["tx_bytes_est"] for r in results) == pytest.approx(250000)
+
+    def test_separate_netns_counted_individually(self):
+        # A container with its own netns gets its own counters, not shared ones.
+        procs = [self._proc(1, "host", 50.0), self._proc(2, "container", 50.0)]
+        results = self._run_fallback(procs, {1: "4026531956", 2: "4026532000"})
+
+        host = next(r for r in results if r["pid"] == 1)
+        container = next(r for r in results if r["pid"] == 2)
+        assert host["rx_bytes_est"] == pytest.approx(500000)
+        assert container["rx_bytes_est"] == pytest.approx(500000)
+
+    def test_unreadable_netns_attributed_zero(self):
+        procs = [self._proc(1, "other_user", 50.0)]
+        results = self._run_fallback(procs, {1: None})
+        assert len(results) == 1
+        assert results[0]["rx_bytes_est"] == 0
+        assert results[0]["tx_bytes_est"] == 0
+
+    def test_zero_cpu_splits_equally(self):
+        procs = [self._proc(1, "idle_a", 0.0), self._proc(2, "idle_b", 0.0)]
+        results = self._run_fallback(procs, {1: "4026531956", 2: "4026531956"})
+        for r in results:
+            assert r["rx_bytes_est"] == pytest.approx(250000)
 
 
 class TestEbpfNetTracer:

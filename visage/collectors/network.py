@@ -174,6 +174,34 @@ def get_process_sockets(pid: int) -> list[dict[str, Any]]:
     return matched
 
 
+def _netns_id(pid: int) -> str | None:
+    """Return the inode of the process's network namespace, or None if unreadable."""
+    try:
+        target = os.readlink(f"/proc/{pid}/ns/net")
+        return target.split("[")[-1].rstrip("]")
+    except OSError:
+        return None
+
+
+def _read_proc_net_dev(pid: int) -> tuple[int, int]:
+    """Read cumulative non-loopback rx/tx byte counters from a process's netns view."""
+    rx_bytes = 0
+    tx_bytes = 0
+    try:
+        with open(f"/proc/{pid}/net/dev") as f:
+            lines = f.readlines()
+        for line in lines[2:]:
+            parts = line.split()
+            if len(parts) >= 10:
+                iface = parts[0].rstrip(":")
+                if iface != "lo":
+                    rx_bytes += int(parts[1])
+                    tx_bytes += int(parts[9])
+    except (OSError, ValueError):
+        pass
+    return rx_bytes, tx_bytes
+
+
 def collect_per_process(top_n: int = 10) -> list[dict[str, Any]]:
     """Collect per-process network attribution with eBPF and socket accounting."""
     if sys.platform != "linux":
@@ -210,68 +238,67 @@ def collect_per_process(top_n: int = 10) -> list[dict[str, Any]]:
     except Exception:
         pass
 
-    # 2. Inode-aware socket & namespace fallback
+    # 2. Inode-aware socket & namespace fallback.
+    # /proc/<pid>/net/dev reports counters per network namespace, not per
+    # process: summing it across processes multiplies traffic by the number
+    # of processes sharing a namespace. Group processes by netns, read each
+    # namespace's counters once, then attribute that namespace's traffic
+    # across its members by CPU share so estimates sum to actual traffic.
     results: list[dict[str, Any]] = []
     try:
         socket_map = parse_socket_tables()
-        procs = []
+        procs: list[dict[str, Any]] = []
         for p in psutil.process_iter(["pid", "name", "cpu_percent"]):
             try:
                 info = p.info
                 pid = info["pid"]
                 inodes = get_process_socket_inodes(pid)
                 sockets = [socket_map[i] for i in inodes if i in socket_map]
-
-                net_path = f"/proc/{pid}/net/dev"
-                rx_bytes = 0
-                tx_bytes = 0
-                try:
-                    with open(net_path) as f:
-                        lines = f.readlines()
-                    for line in lines[2:]:
-                        parts = line.split()
-                        if len(parts) >= 10:
-                            iface = parts[0].rstrip(":")
-                            if iface != "lo":
-                                rx_bytes += int(parts[1])
-                                tx_bytes += int(parts[9])
-                except (OSError, ValueError):
-                    pass
-
                 procs.append({
                     "pid": pid,
                     "name": info.get("name", ""),
                     "cpu": info.get("cpu_percent", 0.0) or 0.0,
-                    "rx_bytes": rx_bytes,
-                    "tx_bytes": tx_bytes,
                     "socket_count": len(sockets),
                     "sockets": sockets,
+                    "netns": _netns_id(pid),
                 })
             except (OSError, ValueError, psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
-        # Attribute with socket weight
-        total_cpu = sum(p["cpu"] for p in procs) or 1.0
-        total_rx = sum(p["rx_bytes"] for p in procs)
-        total_tx = sum(p["tx_bytes"] for p in procs)
+        ns_members: dict[str | None, list[dict[str, Any]]] = {}
+        for proc in procs:
+            ns_members.setdefault(proc["netns"], []).append(proc)
 
-        for p in procs:
-            proportion = p["cpu"] / total_cpu
-            sock_weight = 1.5 if p["socket_count"] > 0 else 1.0
-            rx_est = total_rx * proportion * (sock_weight if total_rx > 0 else 1.0)
-            tx_est = total_tx * proportion * (sock_weight if total_tx > 0 else 1.0)
-            results.append({
-                "pid": p["pid"],
-                "name": p["name"],
-                "rx_bytes": int(rx_est),
-                "tx_bytes": int(tx_est),
-                "rx_bytes_est": rx_est,
-                "tx_bytes_est": tx_est,
-                "socket_count": p["socket_count"],
-                "sockets": p["sockets"],
-                "cpu_share": p["cpu"],
-                "method": "socket_inode" if p["socket_count"] > 0 else "proc_net_dev",
-            })
+        for netns, members in ns_members.items():
+            if netns is None:
+                # Namespace unreadable (other user): cannot attribute honestly.
+                for member in members:
+                    member["rx_total"] = 0
+                    member["tx_total"] = 0
+                continue
+            rx_total, tx_total = _read_proc_net_dev(members[0]["pid"])
+            for member in members:
+                member["rx_total"] = rx_total
+                member["tx_total"] = tx_total
+
+        for members in ns_members.values():
+            total_cpu = sum(m["cpu"] for m in members)
+            for m in members:
+                share = (m["cpu"] / total_cpu) if total_cpu > 0 else (1.0 / len(members))
+                rx_est = m["rx_total"] * share
+                tx_est = m["tx_total"] * share
+                results.append({
+                    "pid": m["pid"],
+                    "name": m["name"],
+                    "rx_bytes": int(rx_est),
+                    "tx_bytes": int(tx_est),
+                    "rx_bytes_est": rx_est,
+                    "tx_bytes_est": tx_est,
+                    "socket_count": m["socket_count"],
+                    "sockets": m["sockets"],
+                    "cpu_share": m["cpu"],
+                    "method": "socket_inode" if m["socket_count"] > 0 else "proc_net_dev",
+                })
 
         results.sort(key=lambda x: x["rx_bytes_est"] + x["tx_bytes_est"] + (x["socket_count"] * 1024), reverse=True)
     except Exception:
