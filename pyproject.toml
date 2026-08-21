@@ -1,6 +1,6 @@
 [project]
 name = "visage"
-version = "0.2.0"
+dynamic = ["version"]
 description = "System Performance Dashboard — live TUI for CPU, memory, disk, network, and processes"
 authors = [{ name = "Anomaly Co." }]
 license = { text = "MIT" }
@@ -47,12 +47,12 @@ Documentation = "https://github.com/anomalyco/visage#readme"
 [project.scripts]
 visage = "visage.__main__:main"
 
-[project.entry-points.console_scripts]
-visage = "visage.__main__:main"
-
 [build-system]
 requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = {attr = "visage.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["visage*"]

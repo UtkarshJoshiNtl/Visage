@@ -3,13 +3,16 @@
 import asyncio
 import json
 import logging
+import os
+import secrets
 import time
 from functools import partial
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from starlette.requests import Request
 
 from visage.collectors import cpu, disk, memory, network, process, gpu
 from visage.collectors.sensors import collect as collect_sensors
@@ -19,122 +22,109 @@ from visage.collectors.psi import collect as collect_psi
 
 logger = logging.getLogger("visage.remote")
 
-app = FastAPI(title="Visage Remote", version="0.2.0")
+try:
+    from visage import __version__ as _VERSION
+except Exception:
+    _VERSION = "unknown"
+
+app = FastAPI(title="Visage Remote", version=_VERSION)
+
+_DEFAULT_ORIGINS = [
+    "http://localhost",
+    "http://127.0.0.1",
+    "http://localhost:8090",
+    "http://127.0.0.1:8090",
+]
+_cors_origins = os.environ.get("VISAGE_CORS_ORIGINS", "").strip()
+allow_origins = _cors_origins.split(",") if _cors_origins else _DEFAULT_ORIGINS
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=allow_origins,
+    allow_methods=["GET"],
     allow_headers=["*"],
 )
 
+_AUTH_TOKEN = os.environ.get("VISAGE_AUTH_TOKEN", "")
+_semaphore = asyncio.Semaphore(4)
+
+
+def _verify_token(request: Request) -> None:
+    if not _AUTH_TOKEN:
+        return
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer ") and secrets.compare_digest(auth[7:], _AUTH_TOKEN):
+        return
+    raise HTTPException(status_code=401, detail="Invalid or missing auth token")
+
 
 async def _run_collect(collector_fn, *args, **kwargs):
-    return await asyncio.get_event_loop().run_in_executor(
+    return await asyncio.get_running_loop().run_in_executor(
         None, partial(collector_fn, *args, **kwargs)
     )
 
 
 @app.get("/")
 async def root():
-    return {"service": "Visage Remote Monitoring", "version": "0.2.0"}
+    return {"service": "Visage Remote Monitoring", "version": _VERSION}
 
 
-@app.get("/metrics")
+@app.get("/metrics", dependencies=[Depends(_verify_token)])
 async def metrics():
-    cpu_data, mem_data, disk_data, net_data = await asyncio.gather(
-        _run_collect(cpu.collect),
-        _run_collect(memory.collect),
-        _run_collect(disk.collect),
-        _run_collect(network.collect),
-    )
-    proc_data, sensor_data, bat_data, gpu_data = await asyncio.gather(
-        _run_collect(process.collect, top_n=20),
-        _run_collect(collect_sensors),
-        _run_collect(collect_battery),
-        _run_collect(gpu.collect),
-    )
-    docker_data = await _run_collect(collect_docker)
-    psi_data = await _run_collect(collect_psi)
-    return {
-        "cpu": cpu_data,
-        "memory": mem_data,
-        "disk": disk_data,
-        "network": net_data,
-        "gpu": gpu_data,
-        "processes": proc_data,
-        "sensors": sensor_data,
-        "battery": bat_data,
-        "docker": docker_data,
-        "psi": psi_data,
-    }
+    async with _semaphore:
+        cpu_data, mem_data, disk_data, net_data = await asyncio.gather(
+            _run_collect(cpu.collect),
+            _run_collect(memory.collect),
+            _run_collect(disk.collect),
+            _run_collect(network.collect),
+        )
+        proc_data, sensor_data, bat_data, gpu_data = await asyncio.gather(
+            _run_collect(process.collect, top_n=20),
+            _run_collect(collect_sensors),
+            _run_collect(collect_battery),
+            _run_collect(gpu.collect),
+        )
+        docker_data = await _run_collect(collect_docker)
+        psi_data = await _run_collect(collect_psi)
+        return {
+            "cpu": cpu_data,
+            "memory": mem_data,
+            "disk": disk_data,
+            "network": net_data,
+            "gpu": gpu_data,
+            "processes": proc_data,
+            "sensors": sensor_data,
+            "battery": bat_data,
+            "docker": docker_data,
+            "psi": psi_data,
+        }
 
 
-@app.get("/metrics/prometheus")
+@app.get("/metrics/prometheus", dependencies=[Depends(_verify_token)])
 async def prometheus_metrics():
-    cpu_data, mem_data, disk_data, net_data = await asyncio.gather(
-        _run_collect(cpu.collect),
-        _run_collect(memory.collect),
-        _run_collect(disk.collect),
-        _run_collect(network.collect),
-    )
-    gpu_data = await _run_collect(gpu.collect)
-    from visage.export.exporter import prometheus_format
-    flat = {
-        "cpu_percent": cpu_data.get("percent", 0),
-        "cpu_count": cpu_data.get("count", 0),
-        "memory_percent": mem_data.get("percent", 0),
-        "memory_used": mem_data.get("used", 0),
-        "memory_total": mem_data.get("total", 0),
-        "disk_read_bytes": disk_data.get("total", {}).get("read_bytes", 0),
-        "disk_write_bytes": disk_data.get("total", {}).get("write_bytes", 0),
-        "network_bytes_recv": net_data.get("total", {}).get("bytes_recv", 0),
-        "network_bytes_sent": net_data.get("total", {}).get("bytes_sent", 0),
-        "gpu_sm_util": gpu_data.get("sm_util", 0),
-        "gpu_temp_c": gpu_data.get("temp_c", 0),
-    }
-    return PlainTextResponse(prometheus_format(flat))
-
-
-@app.get("/cpu")
-async def cpu_metrics():
-    return await _run_collect(cpu.collect)
-
-
-@app.get("/memory")
-async def mem_metrics():
-    return await _run_collect(memory.collect)
-
-
-@app.get("/disk")
-async def disk_metrics():
-    return await _run_collect(disk.collect)
-
-
-@app.get("/network")
-async def net_metrics():
-    return await _run_collect(network.collect)
-
-
-@app.get("/processes")
-async def proc_metrics():
-    return await _run_collect(process.collect, top_n=30)
-
-
-@app.get("/gpu")
-async def gpu_metrics():
-    from visage.collectors.gpu import collect as collect_gpu
-    return await _run_collect(collect_gpu)
-
-
-@app.get("/sensors")
-async def sensor_metrics():
-    return await _run_collect(collect_sensors)
-
-
-@app.get("/battery")
-async def battery_metrics():
-    return await _run_collect(collect_battery)
+    async with _semaphore:
+        cpu_data, mem_data, disk_data, net_data = await asyncio.gather(
+            _run_collect(cpu.collect),
+            _run_collect(memory.collect),
+            _run_collect(disk.collect),
+            _run_collect(network.collect),
+        )
+        gpu_data = await _run_collect(gpu.collect)
+        from visage.export.exporter import prometheus_format
+        flat = {
+            "cpu_percent": cpu_data.get("percent", 0),
+            "cpu_count": cpu_data.get("count", 0),
+            "memory_percent": mem_data.get("percent", 0),
+            "memory_used": mem_data.get("used", 0),
+            "memory_total": mem_data.get("total", 0),
+            "disk_read_bytes": disk_data.get("total", {}).get("read_bytes", 0),
+            "disk_write_bytes": disk_data.get("total", {}).get("write_bytes", 0),
+            "network_bytes_recv": net_data.get("total", {}).get("bytes_recv", 0),
+            "network_bytes_sent": net_data.get("total", {}).get("bytes_sent", 0),
+            "gpu_sm_util": gpu_data.get("sm_util", 0),
+            "gpu_temp_c": gpu_data.get("temp_c", 0),
+        }
+        return PlainTextResponse(prometheus_format(flat))
 
 
 @app.get("/health")
@@ -145,32 +135,40 @@ async def health():
 @app.websocket("/ws/metrics")
 async def websocket_metrics(websocket: WebSocket):
     await websocket.accept()
+
+    if _AUTH_TOKEN:
+        token = websocket.headers.get("authorization", "")
+        if not (token.startswith("Bearer ") and secrets.compare_digest(token[7:], _AUTH_TOKEN)):
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
+
     interval = 2.0
     try:
-        while True:
-            cpu_data, mem_data, disk_data, net_data = await asyncio.gather(
-                _run_collect(cpu.collect),
-                _run_collect(memory.collect),
-                _run_collect(disk.collect),
-                _run_collect(network.collect),
-            )
-            proc_data = await _run_collect(process.collect, top_n=20)
-            data = {
-                "timestamp": time.time(),
-                "cpu": cpu_data,
-                "memory": mem_data,
-                "disk": disk_data,
-                "network": net_data,
-                "processes": proc_data,
-            }
-            await websocket.send_text(json.dumps(data, default=str))
-            await asyncio.sleep(interval)
+        async with _semaphore:
+            while True:
+                cpu_data, mem_data, disk_data, net_data = await asyncio.gather(
+                    _run_collect(cpu.collect),
+                    _run_collect(memory.collect),
+                    _run_collect(disk.collect),
+                    _run_collect(network.collect),
+                )
+                proc_data = await _run_collect(process.collect, top_n=20)
+                data = {
+                    "timestamp": time.time(),
+                    "cpu": cpu_data,
+                    "memory": mem_data,
+                    "disk": disk_data,
+                    "network": net_data,
+                    "processes": proc_data,
+                }
+                await websocket.send_text(json.dumps(data, default=str))
+                await asyncio.sleep(interval)
     except WebSocketDisconnect:
         pass
     except Exception:
         logger.exception("WebSocket error")
 
 
-def serve(host: str = "0.0.0.0", port: int = 8090) -> None:
+def serve(host: str = "127.0.0.1", port: int = 8090) -> None:
     """Start the remote monitoring server."""
     uvicorn.run(app, host=host, port=port)

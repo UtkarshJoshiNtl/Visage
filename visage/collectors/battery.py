@@ -7,13 +7,13 @@ from typing import Any
 
 def collect() -> dict[str, Any]:
     if sys.platform != "linux":
-        return {"available": False}
+        return {"available": False, "batteries": [], "percent": 0.0, "status": "Unknown"}
 
     base = Path("/sys/class/power_supply")
     if not base.exists():
-        return {"available": False}
+        return {"available": False, "batteries": [], "percent": 0.0, "status": "Unknown"}
 
-    batteries = []
+    batteries: list[dict[str, Any]] = []
     for bat_dir in sorted(base.glob("BAT*")):
         if not bat_dir.is_dir():
             continue
@@ -69,6 +69,12 @@ def collect() -> dict[str, Any]:
         })
 
     if not batteries:
-        return {"available": False}
+        return {"available": False, "batteries": [], "percent": 0.0, "status": "Unknown"}
 
-    return {"available": True, "batteries": batteries}
+    primary = batteries[0]
+    return {
+        "available": True,
+        "batteries": batteries,
+        "percent": primary.get("capacity", 0) if primary.get("capacity", -1) >= 0 else 0.0,
+        "status": primary.get("status", "Unknown"),
+    }

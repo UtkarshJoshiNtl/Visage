@@ -66,6 +66,26 @@ class ProcessesWidget(Widget):
         self._vim_pending: str = ""
         self._long_cmdline = False
 
+    @property
+    def sort_by(self) -> str:
+        return self._sort_by
+
+    @property
+    def sort_reverse(self) -> bool:
+        return self._sort_reverse
+
+    @property
+    def filter_str(self) -> str:
+        return self._filter_str
+
+    @property
+    def tree_mode(self) -> bool:
+        return self._tree_mode
+
+    @property
+    def aggregate_mode(self) -> bool:
+        return self._aggregate_mode
+
     def compose(self):
         with Vertical(classes="metric-card"):
             yield Label("Processes", id="proc-title", classes="metric-title")
@@ -287,7 +307,7 @@ class ProcessesWidget(Widget):
     def _apply_renice(self, pid: int, nice_val: int) -> None:
         import os
         try:
-            os.nice(nice_val)
+            os.setpriority(os.PRIO_PROCESS, pid, nice_val)
             self.notify(f"Set nice={nice_val} for PID {pid}", timeout=3)
         except (OSError, PermissionError) as e:
             self.notify(f"Renice failed: {e}", timeout=3, severity="error")

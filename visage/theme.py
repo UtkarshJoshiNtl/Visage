@@ -8,7 +8,7 @@ from typing import Any
 try:
     import tomllib
 except ImportError:
-    import tomli as tomllib
+    import tomli as tomllib  # type: ignore[no-redef]
 
 
 @dataclass

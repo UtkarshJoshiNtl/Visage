@@ -13,6 +13,7 @@ import argparse
 import signal
 import sys
 import time
+from pathlib import Path
 
 
 def main() -> None:
@@ -36,6 +37,12 @@ def main() -> None:
         type=int,
         default=8090,
         help="Remote server port",
+    )
+    parser.add_argument(
+        "--remote-host",
+        type=str,
+        default="127.0.0.1",
+        help="Remote server bind address (default: 127.0.0.1)",
     )
     parser.add_argument(
         "--export",
@@ -62,7 +69,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=str,
-        default="visage_snapshot.json",
+        default=str(Path.home() / "visage_snapshot.json"),
         help="Output path for --export",
     )
     parser.add_argument(
@@ -74,14 +81,14 @@ def main() -> None:
     parser.add_argument(
         "--version",
         action="version",
-        version="visage 0.2.0",
+        version=f"visage {__import__('visage').__version__}",
     )
     args = parser.parse_args()
 
     if args.benchmark:
         _run_benchmark()
     elif args.remote:
-        _run_remote(args.remote_port)
+        _run_remote(args.remote_host, args.remote_port)
     elif args.export:
         _run_export(args.output, args.export_format)
     elif args.export_continuous:
@@ -128,11 +135,11 @@ def _run_benchmark() -> None:
         console.print()
 
 
-def _run_remote(port: int) -> None:
+def _run_remote(host: str = "127.0.0.1", port: int = 8090) -> None:
     from visage.remote.server import serve
 
-    print(f"Starting Visage remote monitoring on port {port}...")
-    serve(port=port)
+    print(f"Starting Visage remote monitoring on {host}:{port}...")
+    serve(host=host, port=port)
 
 
 def _run_export(path: str, fmt: str = "json") -> None:

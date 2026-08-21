@@ -1,4 +1,4 @@
-# Visage — System Performance Dashboard
+# Visage v0.2.0 — System Performance Dashboard
 
 > A live terminal UI that puts your system's vital metrics at your fingertips.
 > Built for developers who want to understand what their machine is doing, in real time.
@@ -238,9 +238,10 @@ Alert rules: `op` is one of `gt|lt|gte|lte`, `cooldown` (seconds) suppresses rep
 ```bash
 visage --remote
 visage --remote --remote-port 9090  # custom port
+visage --remote --remote-host 0.0.0.0  # bind to all interfaces (default: 127.0.0.1)
 ```
 
-Exposes all metrics as JSON over HTTP, with per-metric endpoints and WebSocket streaming:
+Exposes all metrics as JSON over HTTP, with per-metric endpoints and WebSocket streaming. By default, binds to `127.0.0.1` (localhost only). Set `VISAGE_AUTH_TOKEN` in the environment to enable Bearer token authentication on all endpoints.
 
 ```bash
 curl http://localhost:8090/metrics
@@ -262,6 +263,13 @@ WebSocket for real-time streaming:
 ```bash
 wscat -c ws://localhost:8090/ws/metrics
 ```
+
+**Environment Variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VISAGE_AUTH_TOKEN` | _(none)_ | If set, all endpoints require `Authorization: Bearer <token>` |
+| `VISAGE_CORS_ORIGINS` | `http://localhost,...` | Comma-separated allowed origins for CORS |
 
 Endpoints:
 
@@ -331,12 +339,13 @@ visage [OPTIONS]
 Options:
   --benchmark              Run CPU, memory, and disk benchmarks
   --remote                 Start remote monitoring HTTP server
+  --remote-host HOST       Remote server bind address (default: 127.0.0.1)
   --remote-port PORT       Remote server port (default: 8090)
   --export                 Snapshot metrics once to JSON
   --export-continuous      Continuous CSV export at regular intervals
   --export-interval SECS   Interval for continuous export (default: 5.0)
   --export-format FORMAT   Export format: json or jsonl (default: json)
-  --output PATH            Output path for --export (default: visage_snapshot.json)
+  --output PATH            Output path for --export (default: ~/visage_snapshot.json)
   --config PATH            Path to config JSON
   --version                Show version and exit
   -h, --help               Show help message
@@ -410,12 +419,13 @@ visage/
 ### Design Decisions
 
 - **Collectors are stateless** — they return plain dicts. Stateful rate computation (disk, network deltas) lives in `DeltaTracker` in `util.py`, owned by the app layer.
-- **Widgets use Textual reactives** — each widget exposes `reactive` attributes. Setting them triggers targeted re-renders.
-- **Theme system is TOML-based** — themes define color variables that generate TCSS dynamically. No external deps.
+- **Thread-safe collectors** — `cpu.py`, `memory.py`, `network.py` use `threading.Lock` to protect FD access and state from concurrent reads.
+- **Widgets use Textual reactives** — each widget exposes `reactive` attributes and public read-only properties. Setting them triggers targeted re-renders.
+- **Theme system is TOML-based** — themes define color variables that generate TCSS dynamically. Cached to `~/.cache/visage/style.tcss`. No external deps.
 - **Per-process network is approximated** — uses `/proc/[pid]/net/dev` deltas attributed proportionally by CPU usage (no netlink required).
 - **ASCII fallback is automatic** — SSH sessions and non-UTF terminals get block/ASCII graphs instead of braille.
-- **Remote mode shares the same code** — `visage --remote` starts a FastAPI server that calls the identical `collectors.*` functions.
-- **Raw /proc parsers** replace psutil for CPU and memory — single FD opened once, seek(0) each tick.
+- **Remote mode is secure by default** — binds to `127.0.0.1`, restricts CORS to localhost, optional Bearer token auth, WebSocket connection limits.
+- **Raw /proc parsers** replace psutil for CPU and memory — single FD opened once, seek(0) each tick, with stale FD recovery.
 - **No third-party deps for PMU counters** — `perf_event_open` called via raw `ctypes`.
 - **Graceful degradation** — all kernel-level features (eBPF, PMU, cpuset, frequency lock) fall back to unprivileged alternatives when root/permissions are unavailable.
 
@@ -467,6 +477,9 @@ python -m pytest tests/ -v
 - [x] Fan speeds (hwmon), per-process network, cumulative network totals
 - [x] Theme engine (TOML), 6 built-in themes, SSH/ASCII fallback
 - [x] JSON Lines export, Prometheus endpoint, man page, tab completions, PyPI packaging
+- [x] Thread-safe collectors (cpu, memory, network), remote server security hardening
+- [x] Conditional widget timers, public widget properties, CSS fallback resilience
+- [x] Stale FD recovery (cpu, memory), cross-platform perf counters, consistent battery API
 
 ## License
 

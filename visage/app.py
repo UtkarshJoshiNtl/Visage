@@ -1,5 +1,8 @@
 """Visage — system performance dashboard main application."""
 
+import os
+from pathlib import Path
+
 from textual.app import App, ComposeResult
 from textual.containers import Container
 from textual.widgets import Footer, Header
@@ -57,9 +60,17 @@ class VisageApp(App):
         self._theme_names = list_themes()
         self._theme_idx = 0
         self._graph_style = get_graph_style(self._cfg.graph_style)
+        self._active_timers: list = []
 
         if self._cfg.theme in self._theme_names:
             self._theme_idx = self._theme_names.index(self._cfg.theme)
+
+        cache_dir = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "visage"
+        cached_css = cache_dir / "style.tcss"
+        if cached_css.exists():
+            self.CSS_PATH = str(cached_css)
+        elif not (Path(__file__).parent / "style.tcss").exists():
+            self.CSS = ""
 
     _WIDGET_CLASSES = {
         "cpu": CpuWidget,
@@ -72,6 +83,14 @@ class VisageApp(App):
         "battery": BatteryWidget,
         "docker": DockerWidget,
         "processes": ProcessesWidget,
+    }
+
+    _COLLECTOR_TIMERS: dict[str, tuple[str, float, str]] = {
+        "processes": ("fetch_process_metrics", 2.0, "process"),
+        "sensors": ("fetch_sensor_metrics", 9.0, "sensor"),
+        "battery": ("fetch_battery_metrics", 5.0, "battery"),
+        "docker": ("fetch_docker_metrics", 3.0, "docker"),
+        "psi": ("fetch_psi_metrics", 6.0, "psi"),
     }
 
     def _widget(self, name: str):
@@ -117,24 +136,27 @@ class VisageApp(App):
         }
 
         self.fetch_system_metrics()
-        self._sys_timer = self.set_interval(self._interval, self.fetch_system_metrics)
-        self.set_interval(2.0, self.fetch_process_metrics)
-        self.set_interval(self._interval * 3, self.fetch_sensor_metrics)
-        self.set_interval(5.0, self.fetch_battery_metrics)
-        self.set_interval(3.0, self.fetch_docker_metrics)
-        self.set_interval(self._interval * 2, self.fetch_psi_metrics)
+        self._active_timers.append(
+            self.set_interval(self._interval, self.fetch_system_metrics)
+        )
+
+        shown = set(self._cfg.enabled_widgets)
+        for widget_name, (method_name, interval, _group) in self._COLLECTOR_TIMERS.items():
+            if widget_name in shown:
+                fn = getattr(self, method_name)
+                self._active_timers.append(self.set_interval(interval, fn))
 
     def _apply_theme(self, theme_name: str) -> None:
         theme = get_theme(theme_name) or get_default_theme()
         tcss = generate_tcss(theme)
         try:
-            style_path = self.css_path
-            if style_path:
-                from pathlib import Path
-                p = Path(style_path)
-                p.write_text(tcss)
-        except Exception:
-            pass
+            cache_dir = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "visage"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_path = cache_dir / "style.tcss"
+            cache_path.write_text(tcss)
+            self.CSS_PATH = str(cache_path)
+        except Exception as e:
+            self.notify(f"Theme failed: {e}", severity="warning", timeout=5)
         self.refresh()
 
     def _fire_alert(self, message: str) -> None:
@@ -182,11 +204,11 @@ class VisageApp(App):
             return
         proc_data = proc_col.collect(
             top_n=30,
-            sort_by=proc_widget._sort_by,
-            sort_reverse=proc_widget._sort_reverse,
-            filter_str=proc_widget._filter_str,
-            tree_mode=proc_widget._tree_mode,
-            aggregate_mode=proc_widget._aggregate_mode,
+            sort_by=proc_widget.sort_by,
+            sort_reverse=proc_widget.sort_reverse,
+            filter_str=proc_widget.filter_str,
+            tree_mode=proc_widget.tree_mode,
+            aggregate_mode=proc_widget.aggregate_mode,
         )
         self.call_from_thread(proc_widget.update_data, proc_data)
 

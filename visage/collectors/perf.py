@@ -11,12 +11,18 @@ Falls back to returning zeros if the syscall is not permitted.
 import ctypes
 import fcntl
 import os
+import platform
 import struct
 import sys
 import time
 from typing import Any
 
-__NR_perf_event_open = 298
+_ARCH_NR = {
+    "x86_64": 298,
+    "aarch64": 241,
+    "arm": 360,
+}
+__NR_perf_event_open = _ARCH_NR.get(platform.machine(), 298)
 
 PERF_TYPE_HARDWARE = 0
 
@@ -29,7 +35,9 @@ PERF_EVENT_IOC_ENABLE = 0x2400
 PERF_EVENT_IOC_DISABLE = 0x2401
 PERF_EVENT_IOC_RESET = 0x2403
 
-_libc = ctypes.CDLL("libc.so.6", use_errno=True)
+_libc = None
+if sys.platform == "linux":
+    _libc = ctypes.CDLL("libc.so.6", use_errno=True)
 
 
 class _PerfEventAttr(ctypes.Structure):
@@ -49,6 +57,8 @@ class _PerfEventAttr(ctypes.Structure):
 
 
 def _perf_event_open(attr: _PerfEventAttr, pid: int, cpu: int) -> int:
+    if _libc is None:
+        raise OSError("perf_event_open not available on this platform")
     fd = _libc.syscall(__NR_perf_event_open, ctypes.byref(attr), pid, cpu, -1, 0)
     if fd < 0:
         err = ctypes.get_errno()
